@@ -1,0 +1,62 @@
+{
+  "abstract": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English-to-German translation task, improving over the existing best results, including ensembles by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data.",
+  "added_at": "2026-08-02T12:41:11Z",
+  "aliases": [],
+  "authors": [
+    {
+      "name": "Ashish Vaswani"
+    },
+    {
+      "name": "Noam Shazeer"
+    },
+    {
+      "name": "Niki Parmar"
+    },
+    {
+      "name": "Jakob Uszkoreit"
+    },
+    {
+      "name": "Llion Jones"
+    },
+    {
+      "name": "Aidan N. Gomez"
+    },
+    {
+      "name": "Lukasz Kaiser"
+    },
+    {
+      "name": "Illia Polosukhin"
+    }
+  ],
+  "collections": [],
+  "custom": {},
+  "files": {
+    "pdf": null
+  },
+  "id": "1706.03762",
+  "provenance": [
+    {
+      "added_at": "2026-08-02T12:41:11Z",
+      "kind": "arxiv",
+      "ref": "1706.03762"
+    }
+  ],
+  "published": "2017-06-12",
+  "schema_version": 1,
+  "source": {
+    "id": "1706.03762",
+    "pdf_url": "https://arxiv.org/pdf/1706.03762v7.pdf",
+    "provider": "arxiv",
+    "url": "https://arxiv.org/abs/1706.03762v7",
+    "version": 7
+  },
+  "status": "inbox",
+  "tags": [
+    "demo",
+    "machine-learning"
+  ],
+  "title": "Attention Is All You Need",
+  "type": "preprint",
+  "updated": "2023-08-02",
+  "updated_at": "2026-08-02T12:43:38Z"
+}
