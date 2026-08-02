@@ -1,204 +1,122 @@
 # Arca
 
-Arca is a portable, filesystem-native paper library built for humans and agents.
-The folder is the database. The CLI is only a reference client.
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-## Why this shape
+A portable, filesystem-native paper library for humans and agents. The folder
+is the database; the CLI is only a reference client.
 
-- **Portable:** zip or copy the whole `library/` directory.
-- **Language-neutral:** canonical data is UTF-8 JSON, Markdown, and PDF.
-- **Agent-friendly:** stable JSON/JSONL output, deterministic paths, explicit exit codes.
-- **Human-friendly:** one directory per paper; notes are ordinary Markdown.
-- **No service required:** no SQLite, server, account, framework, or package install.
+<p align="center">
+  <img src="assets/arca-demo.gif" width="960" alt="Arca generating an interactive graph from twenty real machine-learning papers">
+</p>
 
-Python 3.9+ is needed only for the bundled `arca` CLI. Any language can work
-directly with the files described in `SPEC.md`.
-
-The repository contains no personal library, private notes, or bundled PDFs.
-`examples/demo-library/` is a metadata-only public demo with ten classic
-machine-learning papers from 2012–2017. Run
-`./arca init my-library` to create a fresh private library anywhere on disk.
-
-## Five-minute start
+## Quick start
 
 ```bash
+git clone https://github.com/x66ccff/arca.git
+cd arca
+
 ./arca init library
-./arca --library library add 2203.11171
-./arca --library library list
-./arca --library library search "self consistency" --jsonl
-./arca --library library update 2203.11171 --status key --add-tag reasoning
-./arca --library library note 2203.11171 "Canonical same-model ensemble baseline."
-./arca --library library annotate 2203.11171 --page 7 --quote "..." --comment "Key ablation"
-./arca --library library link 2203.11171 extends 2201.11903 --note "Samples multiple CoT paths"
-./arca --library library neighbors 2203.11171 --depth 2 --json
-./arca --library library visualize
-./arca --library library doctor
-```
-
-By default `add` fetches arXiv metadata and the PDF. Use `--no-pdf` only when
-you intentionally want a metadata-only record. Existing PDFs are never
-overwritten unless `--refresh` is supplied.
-
-## Public demo library
-
-The metadata-only demo intentionally contains no PDF files:
-
-- `1207.0580` — Dropout
-- `1312.5602` — Deep Q-Networks (DQN)
-- `1406.2661` — Generative Adversarial Networks (GANs)
-- `1412.6980` — Adam
-- `1502.03167` — Batch Normalization
-- `1506.02640` — YOLO
-- `1512.03385` — ResNet
-- `1602.01783` — Asynchronous Advantage Actor-Critic (A3C)
-- `1703.10593` — CycleGAN
-- `1707.06347` — Proximal Policy Optimization (PPO)
-
-Inspect or visualize it without changing the repository:
-
-```bash
-./arca --library examples/demo-library list
-./arca --library examples/demo-library search "residual" --jsonl
-./arca --library examples/demo-library visualize /tmp/arca-demo.html --force
-```
-
-To keep local PDFs, create your own library and add the examples normally:
-
-```bash
-./arca init my-library
-./arca --library my-library add 1406.2661
-./arca --library my-library add 1512.03385
-./arca --library my-library add 1707.06347
-```
-
-## Folder layout
-
-```text
-library/
-├── manifest.json
-├── papers/
-│   └── 2203.11171/
-│       ├── metadata.json   # canonical structured record
-│       ├── notes/
-│       │   ├── summary.md       # free-form human/agent notes
-│       │   └── annotations.jsonl # page, quote, comment, tags
-│       └── paper.pdf       # original PDF bytes
-├── graph/
-│   └── edges.jsonl         # canonical paper-to-paper relations
-├── _index/
-│   ├── catalog.jsonl       # generated; safe to delete/rebuild
-│   └── paper-graph.html    # generated interactive visualization
-├── .staging/               # transactional imports
-└── .trash/                 # recoverable removals
-```
-
-Only `papers/*/metadata.json`, `notes/`, stored files, and
-`graph/edges.jsonl` are canonical. `_index/catalog.jsonl` is a disposable
-acceleration layer.
-
-## Agent-oriented commands
-
-Every read command supports machine output:
-
-```bash
-./arca --library library list --json
-./arca --library library list --jsonl
-./arca --library library get 2203.11171 --json
-./arca --library library search "verifier" --jsonl
-./arca --library library path 2203.11171
-```
-
-Diagnostics go to stderr; structured data goes to stdout. A non-zero exit code
-means the requested operation did not complete.
-
-For bulk or non-Python workflows, write records following
-`schema/paper.schema.json`, place them under `papers/<key>/`, then run:
-
-```bash
-./arca --library library reindex
-./arca --library library doctor
-```
-
-You can also ingest a local metadata file and PDF atomically:
-
-```bash
-./arca --library library ingest record.json --pdf downloaded-paper.pdf
-```
-
-## Default visualization
-
-Generate the built-in interactive paper graph with one command:
-
-```bash
+./arca --library library add 1706.03762
+./arca --library library search "attention" --jsonl
 ./arca --library library citation-sync
 ./arca --library library visualize
 ```
 
-`citation-sync` uses the free Semantic Scholar API and stores the result inside
-the library folder; visualization itself remains offline.
+Open `library/_index/paper-graph.html` in any browser. The generated graph is a
+standalone offline HTML file.
 
-The default output is `library/_index/paper-graph.html`. It is a standalone,
-offline HTML file: D3 is embedded, so opening the page does not require a
-server, package manager, or network connection. Solid directed edges are
-citations read from the portable `_index/citation-cache.json` cache. Dashed
-undirected edges are title-and-abstract similarity relations (title-weighted
-TF-IDF cosine; up to four nearest neighbors per paper, minimum similarity 0.05).
-If the same pair has both relations, the citation edge takes precedence. The
-dashed-edge force is intentionally much weaker than citation force (`0.065`
-versus `0.46`). Stored manual edges and chat history do not create displayed
-connections. Node color denotes the primary collection; older papers are more
-transparent, newer papers are more opaque, and node diameter grows with total
-displayed degree. Nodes can be dragged, the canvas can be panned or zoomed, and
-clicking a node highlights its neighbors by relation type. Labels use semantic
-zoom like a map: the overview shows only high-degree hubs, zooming in reveals
-progressively more arXiv IDs, and deeper zoom adds shortened paper titles.
+`add` downloads arXiv metadata and the PDF by default. Add `--no-pdf` for a
+metadata-only record.
 
-Render a neighborhood or choose an output path:
+## What it does
+
+- Stores metadata, PDFs, notes, annotations, and relationships in ordinary folders.
+- Imports papers directly from an arXiv ID or URL.
+- Searches locally with stable text, JSON, or JSONL output.
+- Links papers into a portable, editable knowledge graph.
+- Builds an interactive citation and title/abstract-similarity graph.
+- Uses atomic writes, validates PDFs, and moves removals to `.trash/`.
+
+No database, server, account, or package manager is required. Local search,
+notes, graph export, and visualization work offline; only arXiv import and
+`citation-sync` need network access. Python 3.9+ is needed only for the bundled
+CLI; any language can read and write the canonical JSON, JSONL, Markdown, and
+PDF files directly.
+
+## Example commands
 
 ```bash
-./arca --library library visualize --center 2203.11171 --depth 2
-./arca --library library visualize ./my-paper-graph.html --force
+# Query
+./arca --library library list
+./arca --library library get 1706.03762 --json
+./arca --library library search "transformer" --jsonl
+./arca --library library path 1706.03762
+
+# Organize
+./arca --library library update 1706.03762 --status key --add-tag attention
+./arca --library library note 1706.03762 "Canonical Transformer paper."
+./arca --library library annotate 1706.03762 --page 3 --quote "..." --comment "Core architecture"
+
+# Connect papers
+./arca --library library link 1810.04805 extends 1706.03762 --note "Bidirectional pre-training"
+./arca --library library neighbors 1706.03762 --depth 2 --json
+./arca --library library graph --format dot
+
+# Visualize and validate
+./arca --library library citation-sync
+./arca --library library visualize --center 1706.03762 --depth 2
+./arca --library library doctor --full
+
+# Recoverable removal
+./arca --library library remove 1706.03762 --yes
+./arca --library library restore 1706.03762
 ```
 
-The HTML is generated state, not canonical library data, and can be deleted or
-rebuilt at any time. The template is `templates/default-visualization.html`.
+Run `./arca --help` or `./arca COMMAND --help` for the complete CLI reference.
 
-## Safety model
+## Included demo
 
-- Writes use a temporary file followed by atomic replacement.
-- New imports are assembled in `.staging/` before becoming visible.
-- `remove` moves a paper to `.trash/`; it does not erase it.
-- Existing PDFs are not overwritten without `--refresh`.
-- Downloads must begin with `%PDF-` and be larger than 10 KiB.
-- SHA-256 and byte size are stored and checked by `doctor`.
+`examples/demo-library/` contains metadata for 20 real classic
+machine-learning papers—from Word2Vec, GAN, ResNet, and PPO to Transformer,
+BERT, DDPM, ViT, and CLIP. It contains no PDFs.
 
-## Useful commands
+```bash
+./arca --library examples/demo-library list
+./arca --library examples/demo-library search "residual" --jsonl
+./arca --library examples/demo-library citation-sync
+./arca --library examples/demo-library visualize /tmp/arca-demo.html --force
+```
+
+## Folder format
 
 ```text
-init PATH                         create a library
-add ARXIV_ID_OR_URL               fetch metadata and PDF
-ingest METADATA_JSON [--pdf PDF]  add local files atomically
-list / get / search / path        query records
-update ID                         change status, title, or tags
-note ID TEXT                      append timestamped Markdown note
-annotate ID                       add a page/quote/comment annotation
-link / unlink / neighbors         edit and query paper relationships
-graph --format json|jsonl|dot     export the paper graph
-citation-sync                     refresh the free citation cache
-visualize [OUTPUT]                generate the default offline HTML graph
-remove ID --yes                   move to trash
-restore ID                        restore newest matching trash entry
-reindex                           rebuild catalog.jsonl
-doctor [--full]                   validate structure and checksums
+library/
+├── manifest.json
+├── papers/<arxiv-id>/
+│   ├── metadata.json
+│   ├── paper.pdf
+│   └── notes/
+│       ├── summary.md
+│       └── annotations.jsonl
+├── graph/edges.jsonl
+├── _index/                 # generated; safe to rebuild
+├── .staging/               # transactional imports
+└── .trash/                 # recoverable removals
 ```
 
-## Status vocabulary
+Canonical data lives in `papers/`, `graph/`, and stored files. `_index/` is
+generated acceleration and visualization state. See [SPEC.md](SPEC.md) and the
+JSON schemas in [`schema/`](schema/) for the language-neutral format.
 
-`inbox`, `reading`, `key`, `archived`. Custom tags and collections remain open
-strings, so the format does not impose a research taxonomy.
+## Visualization
+
+Solid directed edges are citations fetched from the free Semantic Scholar API.
+Dashed, weaker edges are computed locally from titles and abstracts. Node size
+tracks degree; newer papers are more opaque. Zooming reveals progressively more
+labels, and clicking a node highlights its neighbors. Visualization remains
+offline after `citation-sync`.
 
 ## License
 
-Arca is released under the MIT License. The bundled D3 distribution retains its
-own license in `vendor/D3-LICENSE.txt`. Paper metadata remains attributable to
-its original sources; the demo does not redistribute paper PDFs.
+MIT. The bundled D3 distribution retains its own license. The demo redistributes
+paper metadata only, not PDFs.
