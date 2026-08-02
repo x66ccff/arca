@@ -1,0 +1,13 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Keep personal libraries outside version control by default.
+/library/
+*.pdf
+
+# Generated or transactional state in the public demo.
+/examples/demo-library/.arca.lock/
+/examples/demo-library/.staging/
+/examples/demo-library/.trash/
+/examples/demo-library/_index/

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arca.local/schema/edge-v1.json",
+  "title": "Arca paper graph edge",
+  "type": "object",
+  "required": ["schema_version", "id", "from", "to", "type", "directed", "created_at"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "format": "uuid" },
+    "from": { "type": "string", "minLength": 1 },
+    "to": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "directed": { "type": "boolean" },
+    "note": { "type": "string" },
+    "created_at": { "type": "string" },
+    "provenance": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": true
+}
+

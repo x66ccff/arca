@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>__ARCA_TITLE_HTML__</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: light-dark(rgb(255 255 255), rgb(24 24 24));
+      --foreground: light-dark(rgb(26 28 31), rgb(245 246 248));
+      --muted-foreground: light-dark(rgb(96 101 110), rgb(174 179 188));
+      --card: light-dark(rgb(247 248 250), rgb(34 35 38));
+      --border: light-dark(rgb(26 28 31 / 13%), rgb(255 255 255 / 16%));
+      --series-1: light-dark(rgb(54 153 255), rgb(92 174 255));
+      --series-2: light-dark(rgb(230 125 44), rgb(245 154 86));
+      --series-3: light-dark(rgb(70 177 96), rgb(116 213 139));
+      --series-4: light-dark(rgb(214 92 157), rgb(240 143 192));
+      --series-5: light-dark(rgb(131 95 224), rgb(170 145 239));
+      --series-6: light-dark(rgb(42 158 151), rgb(90 203 194));
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 1rem;
+      color: var(--foreground);
+      background: var(--background);
+    }
+    main { width: 100%; }
+    header { margin-bottom: 0.75rem; }
+    h1 { margin: 0; font-size: 1.35rem; font-weight: 600; }
+    header p { margin: 0.25rem 0 0; color: var(--muted-foreground); }
+    .legend, .encoding {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.45rem 0.8rem;
+      margin-bottom: 0.55rem;
+      font-size: 0.8rem;
+    }
+    .legend-item, .encoding-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .swatch, .encoding-dot {
+      display: inline-block;
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+    .swatch { width: 0.72rem; height: 0.72rem; background: var(--swatch); }
+    .encoding-dot { background: var(--series-1); }
+    .old-dot { width: 0.5rem; height: 0.5rem; opacity: 0.24; }
+    .new-dot { width: 0.82rem; height: 0.82rem; opacity: 0.98; }
+    .encoding-arrow, .encoding-divider { color: var(--muted-foreground); }
+    .edge-key { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .edge-key::before { content: ""; display: inline-block; width: 1.9rem; border-top: 1.5px solid var(--foreground); }
+    .similarity-key::before { border-top-color: var(--border); border-top-style: dashed; }
+    .graph-stage { position: relative; width: 100%; }
+    svg {
+      display: block;
+      width: 100%;
+      height: 660px;
+      touch-action: none;
+      cursor: grab;
+    }
+    svg:active { cursor: grabbing; }
+    .link { pointer-events: none; }
+    .link.citation { stroke: var(--foreground); stroke-width: 0.9; opacity: 0.32; marker-end: url(#arca-citation-arrow); }
+    .link.text-similarity { stroke: var(--border); stroke-width: 1; stroke-dasharray: 4 5; opacity: 0.30; }
+    #arca-citation-arrow path { fill: var(--foreground); }
+    .link.active {
+      stroke: var(--foreground);
+      stroke-width: 2;
+      opacity: 0.82;
+    }
+    .node {
+      stroke: var(--background);
+      stroke-width: 2;
+      cursor: pointer;
+      transition: opacity 140ms ease, stroke-width 140ms ease;
+    }
+    .node.selected { stroke: var(--foreground); stroke-width: 3; }
+    .dimmed { opacity: 0.10 !important; }
+    .node-label {
+      fill: var(--foreground);
+      font-size: 12px;
+      pointer-events: none;
+      paint-order: stroke;
+      stroke: var(--background);
+      stroke-width: 3px;
+      stroke-linejoin: round;
+    }
+    .tooltip {
+      position: absolute;
+      max-width: min(340px, 78%);
+      padding: 0.55rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 0.55rem;
+      color: var(--foreground);
+      background: var(--card);
+      pointer-events: none;
+      z-index: 2;
+    }
+    .tooltip-title { font-weight: 600; }
+    .tooltip-meta { margin-top: 0.25rem; font-size: 0.8rem; }
+    .selection {
+      margin-top: 0.6rem;
+      padding: 0.7rem 0.8rem;
+      border-radius: 0.65rem;
+      background: var(--card);
+    }
+    .selection-title { font-weight: 600; }
+    .selection-meta, .selection-neighbors, .selection a {
+      margin-top: 0.28rem;
+      font-size: 0.82rem;
+    }
+    .selection a { display: inline-block; color: var(--foreground); }
+    .empty { padding: 3rem 1rem; text-align: center; color: var(--muted-foreground); }
+    [hidden] { display: none !important; }
+    @media (max-width: 520px) {
+      body { padding: 0.65rem; }
+      svg { height: 520px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .node { transition: none; }
+    }
+  </style>
+</head>
+<body>
+<main id="arca-graph">
+  <header>
+    <h1>__ARCA_TITLE_HTML__</h1>
+    <p>__ARCA_SUMMARY_HTML__</p>
+  </header>
+  <div class="legend" aria-label="主题分类图例"></div>
+  <div class="encoding" aria-label="节点视觉编码">
+    <span class="encoding-item"><span class="encoding-dot old-dot" aria-hidden="true"></span>较旧，更透明</span>
+    <span class="encoding-arrow" aria-hidden="true">→</span>
+    <span class="encoding-item"><span class="encoding-dot new-dot" aria-hidden="true"></span>较新，更不透明</span>
+    <span class="encoding-divider" aria-hidden="true">·</span>
+    <span>直径越大，总度数越高</span>
+    <span class="encoding-divider" aria-hidden="true">·</span>
+    <span class="edge-key citation-key">引用关系</span>
+    <span class="edge-key similarity-key">标题＋摘要相似</span>
+    <span>虚线力更弱</span>
+  </div>
+  <div class="graph-stage">
+    <svg viewBox="0 0 1000 620" role="img" aria-labelledby="graph-title graph-description">
+      <title id="graph-title">__ARCA_TITLE_HTML__</title>
+      <desc id="graph-description">实线箭头表示引用，虚线表示标题与摘要的文本相似关系；虚线的布局力更弱。</desc>
+      <defs><marker id="arca-citation-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs>
+      <g class="zoom-layer">
+        <g class="links"></g>
+        <g class="nodes"></g>
+      </g>
+      <g class="labels"></g>
+    </svg>
+    <div class="tooltip" hidden></div>
+    <div class="empty" hidden>当前范围没有论文。</div>
+  </div>
+  <div class="selection" aria-live="polite">
+    <div class="selection-title">点击任一节点查看论文</div>
+    <div class="selection-meta">缩小时只标高度数节点；放大后自动增加标签并显示标题。</div>
+    <div class="selection-neighbors"></div>
+    <a class="selection-link" hidden target="_blank" rel="noopener noreferrer">打开论文页面</a>
+  </div>
+</main>
+<script>
+__ARCA_D3_SOURCE__
+</script>
+<script>
+(() => {
+  const root = document.getElementById('arca-graph');
+  const dataset = __ARCA_DATA_JSON__;
+  const palette = [
+    'var(--series-1)', 'var(--series-2)', 'var(--series-3)',
+    'var(--series-4)', 'var(--series-5)', 'var(--series-6)',
+    'var(--series-2)', 'var(--series-4)', 'var(--series-6)'
+  ];
+  const categoryColor = new Map(dataset.categories.map((entry, index) => [entry.name, palette[index % palette.length]]));
+  const years = dataset.nodes.map(node => Number(node.year)).filter(Number.isFinite);
+  const yearMin = years.length ? Math.min(...years) : 0;
+  const yearMax = years.length ? Math.max(...years) : 0;
+  const yearOpacity = year => {
+    if (!Number.isFinite(Number(year))) return 0.62;
+    if (yearMax === yearMin) return 0.88;
+    return 0.24 + 0.74 * ((Number(year) - yearMin) / (yearMax - yearMin));
+  };
+  const shorten = (value, limit) => value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+  dataset.nodes.forEach((node, index) => {
+    node._index = index;
+    node._radius = Math.min(20, 4.2 + Math.sqrt(node.degree) * 1.7);
+    node._labelText = [
+      node.id,
+      `${node.id} · ${shorten(node.title, 26)}`,
+      `${node.id} · ${shorten(node.title, 52)}`
+    ];
+    node._labelWidth = node._labelText.map(label => Math.min(390, Math.max(48, label.length * 6.2)));
+  });
+  const nodeRadius = node => node._radius;
+  const rankedNodes = [...dataset.nodes].sort((left, right) =>
+    right.degree - left.degree || left.id.localeCompare(right.id)
+  );
+
+  const legend = root.querySelector('.legend');
+  dataset.categories.forEach(category => {
+    const item = document.createElement('span');
+    item.className = 'legend-item';
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.setProperty('--swatch', categoryColor.get(category.name));
+    swatch.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.textContent = `${category.name} (${category.count})`;
+    item.append(swatch, label);
+    legend.append(item);
+  });
+
+  const svgElement = root.querySelector('svg');
+  const empty = root.querySelector('.empty');
+  if (!dataset.nodes.length) {
+    svgElement.hidden = true;
+    empty.hidden = false;
+    return;
+  }
+
+  const svg = d3.select(svgElement);
+  const zoomLayer = svg.select('.zoom-layer');
+  const width = 1000;
+  const height = 620;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const anchorRadiusX = 330;
+  const anchorRadiusY = 220;
+  const anchors = new Map(dataset.categories.map((category, index) => {
+    const angle = (index / Math.max(1, dataset.categories.length)) * Math.PI * 2 - Math.PI / 2;
+    return [category.name, {
+      x: centerX + Math.cos(angle) * anchorRadiusX,
+      y: centerY + Math.sin(angle) * anchorRadiusY
+    }];
+  }));
+  const adjacency = new Map(dataset.nodes.map(node => [node.id, new Set()]));
+  const citationOut = new Map(dataset.nodes.map(node => [node.id, new Set()]));
+  const citationIn = new Map(dataset.nodes.map(node => [node.id, new Set()]));
+  const textNeighbors = new Map(dataset.nodes.map(node => [node.id, new Set()]));
+  dataset.links.forEach(link => {
+    adjacency.get(link.source)?.add(link.target);
+    adjacency.get(link.target)?.add(link.source);
+    if (link.type === 'cites') {
+      citationOut.get(link.source)?.add(link.target);
+      citationIn.get(link.target)?.add(link.source);
+    } else {
+      textNeighbors.get(link.source)?.add(link.target);
+      textNeighbors.get(link.target)?.add(link.source);
+    }
+  });
+
+  const links = svg.select('.links')
+    .selectAll('line')
+    .data(dataset.links)
+    .join('line')
+    .attr('class', edge => `link ${edge.type === 'cites' ? 'citation' : 'text-similarity'}`);
+
+  const nodes = svg.select('.nodes')
+    .selectAll('circle')
+    .data(dataset.nodes)
+    .join('circle')
+    .attr('class', 'node')
+    .attr('r', node => nodeRadius(node))
+    .attr('fill', node => categoryColor.get(node.category) || 'var(--muted-foreground)')
+    .attr('opacity', node => yearOpacity(node.year))
+    .attr('aria-label', node => `${node.id}：${node.title}，引用 ${node.cites}，被引 ${node.cited_by}，文本近邻 ${node.text_degree}`)
+    .on('pointerenter', showTooltip)
+    .on('pointermove', moveTooltip)
+    .on('pointerleave', hideTooltip)
+    .on('click', (event, node) => {
+      event.stopPropagation();
+      selectNode(node);
+    });
+  nodes.append('title').text(node => `${node.title} (${node.id})`);
+
+  const labels = svg.select('.labels')
+    .selectAll('text')
+    .data(dataset.nodes)
+    .join('text')
+    .attr('class', 'node-label')
+    .attr('text-anchor', 'middle');
+
+  let view = d3.zoomIdentity;
+  let activeId = null;
+  let activeNeighbors = new Set();
+  let visibleNodes = [];
+  const linkElements = links.nodes();
+  const nodeElements = nodes.nodes();
+  const labelElements = labels.nodes();
+  let framePending = false;
+  let graphDirty = true;
+  let labelLayoutDirty = true;
+  let simulationTicks = 0;
+
+  function rankedWithPriority() {
+    if (!activeId) return rankedNodes;
+    const selected = [];
+    const neighbors = [];
+    const rest = [];
+    for (const node of rankedNodes) {
+      if (node.id === activeId) selected.push(node);
+      else if (activeNeighbors.has(node.id)) neighbors.push(node);
+      else rest.push(node);
+    }
+    return selected.concat(neighbors, rest);
+  }
+
+  function updateLabelPositions() {
+    const scale = view.k;
+    for (const node of visibleNodes) {
+      const element = labelElements[node._index];
+      element.setAttribute('x', view.applyX(node.x));
+      element.setAttribute('y', view.applyY(node.y) - node._radius * scale - 5);
+    }
+  }
+
+  function layoutLabels() {
+    const scale = view.k;
+    const budget = Math.min(dataset.nodes.length, Math.round(4 + 8 * scale * scale));
+    const detail = scale >= 3.4 ? 2 : scale >= 2 ? 1 : 0;
+    const priority = node => node.id === activeId ? 2 : activeNeighbors.has(node.id) ? 1 : 0;
+    const accepted = [];
+    const nextVisible = [];
+    const visibleIndexes = new Set();
+    const ranked = rankedWithPriority();
+    for (let index = 0; index < ranked.length; index += 1) {
+      const node = ranked[index];
+      if (index >= budget && !priority(node)) continue;
+      const x = view.applyX(node.x);
+      const y = view.applyY(node.y) - node._radius * scale - 5;
+      if (x < -80 || x > width + 80 || y < -20 || y > height + 20) continue;
+      const labelWidth = node._labelWidth[detail];
+      const box = {left: x - labelWidth / 2 - 3, right: x + labelWidth / 2 + 3, top: y - 14, bottom: y + 3};
+      let collides = false;
+      for (const other of accepted) {
+        if (box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top) {
+          collides = true;
+          break;
+        }
+      }
+      if (collides && !priority(node)) continue;
+      accepted.push(box);
+      nextVisible.push(node);
+      visibleIndexes.add(node._index);
+      const element = labelElements[node._index];
+      if (element.getAttribute('display') === 'none') element.removeAttribute('display');
+      if (element._detail !== detail) {
+        element.textContent = node._labelText[detail];
+        element._detail = detail;
+      }
+      element.setAttribute('x', x);
+      element.setAttribute('y', y);
+    }
+    for (let index = 0; index < labelElements.length; index += 1) {
+      if (!visibleIndexes.has(index) && labelElements[index].getAttribute('display') !== 'none') {
+        labelElements[index].setAttribute('display', 'none');
+      }
+    }
+    visibleNodes = nextVisible;
+  }
+
+  function updateGraphGeometry() {
+    for (let index = 0; index < linkElements.length; index += 1) {
+      const edge = dataset.links[index];
+      const element = linkElements[index];
+      const source = edge.source;
+      const target = edge.target;
+      let targetX = target.x;
+      let targetY = target.y;
+      if (edge.type === 'cites') {
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const length = Math.hypot(dx, dy) || 1;
+        const offset = target._radius + 3;
+        targetX -= dx / length * offset;
+        targetY -= dy / length * offset;
+      }
+      element.setAttribute('x1', source.x);
+      element.setAttribute('y1', source.y);
+      element.setAttribute('x2', targetX);
+      element.setAttribute('y2', targetY);
+    }
+    for (let index = 0; index < nodeElements.length; index += 1) {
+      const node = dataset.nodes[index];
+      nodeElements[index].setAttribute('cx', node.x);
+      nodeElements[index].setAttribute('cy', node.y);
+    }
+  }
+
+  function renderFrame() {
+    framePending = false;
+    if (graphDirty) updateGraphGeometry();
+    if (labelLayoutDirty) layoutLabels();
+    else updateLabelPositions();
+    graphDirty = false;
+    labelLayoutDirty = false;
+  }
+
+  function scheduleRender(updateGraph = false, reflowLabels = false) {
+    graphDirty ||= updateGraph;
+    labelLayoutDirty ||= reflowLabels;
+    if (framePending) return;
+    framePending = true;
+    requestAnimationFrame(renderFrame);
+  }
+
+  const simulation = d3.forceSimulation(dataset.nodes)
+    .force('link', d3.forceLink(dataset.links).id(node => node.id)
+      .distance(edge => edge.type === 'cites' ? 72 : 122)
+      .strength(edge => edge.type === 'cites' ? 0.46 : 0.065))
+    .force('charge', d3.forceManyBody().strength(-112))
+    .force('collision', d3.forceCollide().radius(node => nodeRadius(node) + 5))
+    .force('x', d3.forceX(node => (anchors.get(node.category) || {x: centerX}).x).strength(0.075))
+    .force('y', d3.forceY(node => (anchors.get(node.category) || {y: centerY}).y).strength(0.075))
+    .force('center', d3.forceCenter(centerX, centerY))
+    .on('tick', () => {
+      simulationTicks += 1;
+      scheduleRender(true, simulationTicks % 6 === 0);
+    })
+    .on('end', () => scheduleRender(true, true));
+
+  nodes.call(d3.drag()
+    .on('start', (event, node) => {
+      if (!event.active) simulation.alphaTarget(0.2).restart();
+      node.fx = node.x;
+      node.fy = node.y;
+    })
+    .on('drag', (event, node) => { node.fx = event.x; node.fy = event.y; })
+    .on('end', (event, node) => {
+      if (!event.active) simulation.alphaTarget(0);
+      node.fx = null;
+      node.fy = null;
+    }));
+
+  svg.call(d3.zoom().scaleExtent([0.4, 6]).on('zoom', event => {
+    view = event.transform;
+    zoomLayer.attr('transform', view);
+    scheduleRender(false, true);
+  }));
+  svg.on('click', () => selectNode(null));
+
+  const tooltip = root.querySelector('.tooltip');
+  function showTooltip(event, node) {
+    tooltip.replaceChildren();
+    const title = document.createElement('div');
+    title.className = 'tooltip-title';
+    title.textContent = node.title;
+    const meta = document.createElement('div');
+    meta.className = 'tooltip-meta';
+    meta.textContent = `${node.id} · 引用 ${node.cites} · 被引 ${node.cited_by} · 文本近邻 ${node.text_degree}`;
+    tooltip.append(title, meta);
+    tooltip.hidden = false;
+    moveTooltip(event);
+  }
+  function moveTooltip(event) {
+    const stage = root.querySelector('.graph-stage');
+    const box = stage.getBoundingClientRect();
+    const tip = tooltip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(event.clientX - box.left + 12, box.width - tip.width - 8));
+    const top = Math.max(8, Math.min(event.clientY - box.top + 12, box.height - tip.height - 8));
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+  function hideTooltip() { tooltip.hidden = true; }
+
+  function selectNode(selected) {
+    const selectedId = selected?.id;
+    const neighbors = selectedId ? adjacency.get(selectedId) : new Set();
+    activeId = selectedId || null;
+    activeNeighbors = neighbors;
+    nodes
+      .classed('selected', node => node.id === selectedId)
+      .classed('dimmed', node => selectedId && node.id !== selectedId && !neighbors.has(node.id));
+    links
+      .classed('active', edge => selectedId && (edge.source.id === selectedId || edge.target.id === selectedId))
+      .classed('dimmed', edge => selectedId && edge.source.id !== selectedId && edge.target.id !== selectedId);
+    labels.classed('dimmed', node => selectedId && node.id !== selectedId && !neighbors.has(node.id));
+    scheduleRender(false, true);
+
+    const title = root.querySelector('.selection-title');
+    const meta = root.querySelector('.selection-meta');
+    const neighborLine = root.querySelector('.selection-neighbors');
+    const link = root.querySelector('.selection-link');
+    if (!selected) {
+      title.textContent = '点击任一节点查看论文';
+      meta.textContent = '缩小时只标高度数节点；放大后自动增加标签并显示标题。';
+      neighborLine.textContent = '';
+      link.hidden = true;
+      return;
+    }
+    title.textContent = selected.title;
+    meta.textContent = `${selected.id} · ${selected.year || '年份未知'} · 引用 ${selected.cites} · 被引 ${selected.cited_by} · 文本近邻 ${selected.text_degree} · ${selected.collections.join(' / ') || '未分类'}`;
+    neighborLine.textContent = `引用：${[...citationOut.get(selected.id)].sort().join('、') || '无'}　被引：${[...citationIn.get(selected.id)].sort().join('、') || '无'}　文本：${[...textNeighbors.get(selected.id)].sort().join('、') || '无'}`;
+    if (selected.url) {
+      link.href = selected.url;
+      link.hidden = false;
+    } else {
+      link.hidden = true;
+    }
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arca.local/schema/paper-v1.json",
+  "title": "Arca paper record",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "id",
+    "type",
+    "title",
+    "authors",
+    "source",
+    "status",
+    "tags",
+    "collections",
+    "files",
+    "added_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "enum": ["preprint", "paper", "report", "other"] },
+    "title": { "type": "string", "minLength": 1 },
+    "authors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "type": "string", "minLength": 1 } },
+        "additionalProperties": true
+      }
+    },
+    "abstract": { "type": "string" },
+    "published": { "type": ["string", "null"] },
+    "updated": { "type": ["string", "null"] },
+    "source": {
+      "type": "object",
+      "required": ["provider", "id", "url"],
+      "properties": {
+        "provider": { "type": "string" },
+        "id": { "type": "string" },
+        "version": { "type": ["integer", "null"], "minimum": 1 },
+        "url": { "type": "string" },
+        "pdf_url": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "status": { "type": "string", "enum": ["inbox", "reading", "key", "archived"] },
+    "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "collections": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "files": {
+      "type": "object",
+      "properties": {
+        "pdf": {
+          "type": ["object", "null"],
+          "properties": {
+            "path": { "const": "paper.pdf" },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "bytes": { "type": "integer", "minimum": 10241 },
+            "mime": { "const": "application/pdf" }
+          },
+          "required": ["path", "sha256", "bytes", "mime"],
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "provenance": { "type": "array", "items": { "type": "object" } },
+    "aliases": { "type": "array", "items": { "type": "string" } },
+    "added_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "custom": { "type": "object" }
+  },
+  "additionalProperties": true
+}
+

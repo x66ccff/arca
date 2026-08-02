@@ -1,0 +1,53 @@
+{
+  "abstract": "We propose a new family of policy gradient methods for reinforcement learning, which alternate between sampling data through interaction with the environment, and optimizing a \"surrogate\" objective function using stochastic gradient ascent. Whereas standard policy gradient methods perform one gradient update per data sample, we propose a novel objective function that enables multiple epochs of minibatch updates. The new methods, which we call proximal policy optimization (PPO), have some of the benefits of trust region policy optimization (TRPO), but they are much simpler to implement, more general, and have better sample complexity (empirically). Our experiments test PPO on a collection of benchmark tasks, including simulated robotic locomotion and Atari game playing, and we show that PPO outperforms other online policy gradient methods, and overall strikes a favorable balance between sample complexity, simplicity, and wall-time.",
+  "added_at": "2026-08-02T12:00:41Z",
+  "aliases": [],
+  "authors": [
+    {
+      "name": "John Schulman"
+    },
+    {
+      "name": "Filip Wolski"
+    },
+    {
+      "name": "Prafulla Dhariwal"
+    },
+    {
+      "name": "Alec Radford"
+    },
+    {
+      "name": "Oleg Klimov"
+    }
+  ],
+  "collections": [],
+  "custom": {},
+  "files": {
+    "pdf": null
+  },
+  "id": "1707.06347",
+  "provenance": [
+    {
+      "added_at": "2026-08-02T12:00:41Z",
+      "kind": "arxiv",
+      "ref": "1707.06347"
+    }
+  ],
+  "published": "2017-07-20",
+  "schema_version": 1,
+  "source": {
+    "id": "1707.06347",
+    "pdf_url": "https://arxiv.org/pdf/1707.06347v2.pdf",
+    "provider": "arxiv",
+    "url": "https://arxiv.org/abs/1707.06347v2",
+    "version": 2
+  },
+  "status": "inbox",
+  "tags": [
+    "demo",
+    "machine-learning"
+  ],
+  "title": "Proximal Policy Optimization Algorithms",
+  "type": "preprint",
+  "updated": "2017-08-28",
+  "updated_at": "2026-08-02T12:00:41Z"
+}

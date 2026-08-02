@@ -1,0 +1,1267 @@
+#!/usr/bin/env python3
+"""Arca: a filesystem-native, agent-friendly research paper library."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import hashlib
+import html
+import json
+import math
+import os
+import re
+import shutil
+import sys
+import tempfile
+import time
+import urllib.parse
+import uuid
+import xml.etree.ElementTree as ET
+from collections import Counter
+from datetime import datetime, timezone
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any, Iterable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+FORMAT = "arca-library"
+SCHEMA_VERSION = 1
+STATUSES = ("inbox", "reading", "key", "archived")
+RELATIONS = (
+    "cites", "extends", "contrasts", "supports", "challenges", "uses",
+    "reproduces", "similar", "discussed-with", "other",
+)
+ARXIV_RE = re.compile(r"(?:abs/|pdf/)?([a-z-]+/\d{7}|\d{4}\.\d{4,5})(v(\d+))?", re.I)
+
+
+class ArcaError(Exception):
+    pass
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def eprint(*values: object) -> None:
+    print(*values, file=sys.stderr)
+
+
+def atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary)
+        raise
+
+
+def write_text(path: Path, value: str) -> None:
+    atomic_write(path, value.encode("utf-8"))
+
+
+def write_json(path: Path, value: Any) -> None:
+    write_text(path, json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ArcaError(f"cannot read valid JSON: {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ArcaError(f"expected a JSON object: {path}")
+    return value
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ArcaError(f"invalid JSONL at {path}:{line_no}: {exc}") from exc
+        if not isinstance(row, dict):
+            raise ArcaError(f"expected JSON object at {path}:{line_no}")
+        rows.append(row)
+    return rows
+
+
+def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
+    text = "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows)
+    write_text(path, text)
+
+
+def library_root(raw: str) -> Path:
+    return Path(raw).expanduser().resolve()
+
+
+def require_library(root: Path) -> dict[str, Any]:
+    manifest = read_json(root / "manifest.json")
+    if manifest.get("format") != FORMAT:
+        raise ArcaError(f"not an Arca library: {root}")
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ArcaError(f"unsupported library schema: {manifest.get('schema_version')}")
+    return manifest
+
+
+@contextlib.contextmanager
+def write_lock(root: Path):
+    lock = root / ".arca.lock"
+    try:
+        lock.mkdir()
+    except FileExistsError as exc:
+        raise ArcaError(f"library is locked by another writer: {lock}") from exc
+    try:
+        write_json(lock / "owner.json", {"pid": os.getpid(), "started_at": now()})
+        yield
+    finally:
+        shutil.rmtree(lock, ignore_errors=True)
+
+
+def initialize(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    for relative in ("papers", "_index", ".trash", ".staging", "graph"):
+        (root / relative).mkdir(exist_ok=True)
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists():
+        write_json(manifest_path, {
+            "format": FORMAT,
+            "schema_version": SCHEMA_VERSION,
+            "canonical_glob": "papers/*/metadata.json",
+            "canonical_graph": "graph/edges.jsonl",
+            "generated_index": "_index/catalog.jsonl",
+            "created_at": now(),
+        })
+    for relative in ("_index/catalog.jsonl", "graph/edges.jsonl"):
+        path = root / relative
+        if not path.exists():
+            write_text(path, "")
+
+
+def parse_arxiv(value: str) -> tuple[str, int | None]:
+    match = ARXIV_RE.search(value.strip())
+    if not match:
+        raise ArcaError("expected an arXiv ID or URL")
+    return match.group(1), int(match.group(3)) if match.group(3) else None
+
+
+def paper_key(identifier: str, provider: str = "arxiv") -> str:
+    if provider == "arxiv":
+        key = identifier.replace("/", "__")
+    else:
+        key = f"{provider}__{identifier}"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", key):
+        raise ArcaError(f"unsafe paper key: {key}")
+    return key
+
+
+def paper_dirs(root: Path) -> list[Path]:
+    return sorted((path for path in (root / "papers").iterdir() if path.is_dir()), key=lambda p: p.name)
+
+
+def records(root: Path) -> list[tuple[Path, dict[str, Any]]]:
+    result = []
+    for directory in paper_dirs(root):
+        metadata = directory / "metadata.json"
+        if metadata.exists():
+            result.append((directory, read_json(metadata)))
+    return result
+
+
+def locate(root: Path, value: str) -> tuple[Path, dict[str, Any]]:
+    candidates = [value]
+    with contextlib.suppress(ArcaError):
+        arxiv_id, _ = parse_arxiv(value)
+        candidates.extend([arxiv_id, paper_key(arxiv_id)])
+    for candidate in candidates:
+        direct = root / "papers" / candidate.replace("/", "__")
+        if (direct / "metadata.json").exists():
+            return direct, read_json(direct / "metadata.json")
+    for directory, record in records(root):
+        aliases = record.get("aliases", [])
+        source = record.get("source", {})
+        if value == record.get("id") or value == source.get("id") or value in aliases:
+            return directory, record
+    raise ArcaError(f"paper not found: {value}")
+
+
+def note_path(directory: Path) -> Path:
+    return directory / "notes" / "summary.md"
+
+
+def notes_text(directory: Path) -> str:
+    path = note_path(directory)
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def author_names(record: dict[str, Any]) -> list[str]:
+    names = []
+    for author in record.get("authors", []):
+        if isinstance(author, dict) and isinstance(author.get("name"), str):
+            names.append(author["name"])
+        elif isinstance(author, str):
+            names.append(author)
+    return names
+
+
+def validate_record(record: dict[str, Any]) -> list[str]:
+    errors = []
+    required = ("schema_version", "id", "type", "title", "authors", "source", "status", "tags", "collections", "files", "added_at", "updated_at")
+    for key in required:
+        if key not in record:
+            errors.append(f"missing {key}")
+    if record.get("schema_version") != SCHEMA_VERSION:
+        errors.append("unsupported schema_version")
+    if not isinstance(record.get("title"), str) or not record.get("title", "").strip():
+        errors.append("title must be a non-empty string")
+    if record.get("status") not in STATUSES:
+        errors.append(f"status must be one of {', '.join(STATUSES)}")
+    if not isinstance(record.get("authors"), list):
+        errors.append("authors must be an array")
+    if not isinstance(record.get("tags"), list):
+        errors.append("tags must be an array")
+    if not isinstance(record.get("collections"), list):
+        errors.append("collections must be an array")
+    source = record.get("source")
+    if not isinstance(source, dict) or not all(source.get(k) for k in ("provider", "id", "url")):
+        errors.append("source must contain provider, id, and url")
+    return errors
+
+
+def index_row(directory: Path, record: dict[str, Any]) -> dict[str, Any]:
+    published = record.get("published")
+    return {
+        "id": record.get("id"),
+        "title": record.get("title"),
+        "authors": author_names(record),
+        "year": int(str(published)[:4]) if published and str(published)[:4].isdigit() else None,
+        "published": published,
+        "status": record.get("status"),
+        "tags": record.get("tags", []),
+        "collections": record.get("collections", []),
+        "source": record.get("source", {}),
+        "path": f"papers/{directory.name}",
+        "has_pdf": bool(record.get("files", {}).get("pdf")),
+        "added_at": record.get("added_at"),
+        "updated_at": record.get("updated_at"),
+    }
+
+
+def rebuild_index(root: Path) -> list[dict[str, Any]]:
+    rows = [index_row(directory, record) for directory, record in records(root)]
+    rows.sort(key=lambda row: str(row.get("id", "")))
+    write_jsonl(root / "_index" / "catalog.jsonl", rows)
+    return rows
+
+
+def print_rows(rows: list[dict[str, Any]], mode: str) -> None:
+    if mode == "json":
+        print(json.dumps(rows, ensure_ascii=False, indent=2, sort_keys=True))
+    elif mode == "jsonl":
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False, sort_keys=True))
+    else:
+        if not rows:
+            print("No papers.")
+            return
+        print(f"{'ID':<17} {'STATUS':<9} {'YEAR':<6} TITLE")
+        for row in rows:
+            title = str(row.get("title", "")).replace("\n", " ")
+            if len(title) > 74:
+                title = title[:71] + "..."
+            print(f"{str(row.get('id', '')):<17} {str(row.get('status', '')):<9} {str(row.get('year') or ''):<6} {title}")
+
+
+def request_bytes(url: str, timeout: int = 30, retries: int = 1) -> tuple[bytes, str]:
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            request = Request(url, headers={
+                "User-Agent": "Arca/1.0 portable research library",
+                "Accept": "application/atom+xml,text/html,application/pdf;q=0.9,*/*;q=0.1",
+            })
+            with urlopen(request, timeout=timeout) as response:
+                return response.read(), response.headers.get_content_type()
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            last = exc
+            if attempt < retries:
+                time.sleep(5 if isinstance(exc, HTTPError) and exc.code == 429 else 1)
+    raise ArcaError(f"download failed: {url}: {last}")
+
+
+class MetadataParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.meta: dict[str, list[str]] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "meta":
+            return
+        values = dict(attrs)
+        key = values.get("name") or values.get("property")
+        content = values.get("content")
+        if key and content:
+            self.meta.setdefault(key.lower(), []).append(html.unescape(content).strip())
+
+
+def parse_atom(data: bytes, arxiv_id: str, requested_version: int | None) -> dict[str, Any]:
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    root = ET.fromstring(data)
+    entry = root.find("a:entry", ns)
+    if entry is None:
+        raise ArcaError(f"arXiv returned no entry for {arxiv_id}")
+    title = " ".join((entry.findtext("a:title", "", ns) or "").split())
+    abstract = " ".join((entry.findtext("a:summary", "", ns) or "").split())
+    authors = [{"name": " ".join((author.findtext("a:name", "", ns) or "").split())} for author in entry.findall("a:author", ns)]
+    published = (entry.findtext("a:published", "", ns) or "")[:10] or None
+    updated = (entry.findtext("a:updated", "", ns) or "")[:10] or None
+    entry_id = entry.findtext("a:id", "", ns) or ""
+    version_match = re.search(r"v(\d+)$", entry_id)
+    version = int(version_match.group(1)) if version_match else requested_version
+    if not title:
+        raise ArcaError(f"arXiv metadata is incomplete for {arxiv_id}")
+    return make_record(arxiv_id, version, title, authors, abstract, published, updated)
+
+
+def parse_html_metadata(data: bytes, arxiv_id: str, requested_version: int | None) -> dict[str, Any]:
+    parser = MetadataParser()
+    parser.feed(data.decode("utf-8", errors="replace"))
+    meta = parser.meta
+    title = (meta.get("citation_title") or meta.get("og:title") or [""])[0]
+    abstract = (meta.get("description") or meta.get("og:description") or [""])[0]
+    author_values = meta.get("citation_author", [])
+    authors = [{"name": name} for name in author_values]
+    date = (meta.get("citation_date") or meta.get("citation_publication_date") or [""])[0][:10] or None
+    if not title:
+        raise ArcaError(f"fallback metadata is incomplete for {arxiv_id}")
+    return make_record(arxiv_id, requested_version, title, authors, abstract, date, date)
+
+
+def make_record(arxiv_id: str, version: int | None, title: str, authors: list[dict[str, str]], abstract: str, published: str | None, updated: str | None) -> dict[str, Any]:
+    timestamp = now()
+    suffix = f"v{version}" if version else ""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "id": arxiv_id,
+        "type": "preprint",
+        "title": title.strip(),
+        "authors": authors,
+        "abstract": abstract.strip(),
+        "published": published,
+        "updated": updated,
+        "source": {
+            "provider": "arxiv",
+            "id": arxiv_id,
+            "version": version,
+            "url": f"https://arxiv.org/abs/{arxiv_id}{suffix}",
+            "pdf_url": f"https://arxiv.org/pdf/{arxiv_id}{suffix}.pdf",
+        },
+        "status": "inbox",
+        "tags": [],
+        "collections": [],
+        "files": {"pdf": None},
+        "provenance": [{"kind": "arxiv", "ref": arxiv_id, "added_at": timestamp}],
+        "aliases": [],
+        "added_at": timestamp,
+        "updated_at": timestamp,
+        "custom": {},
+    }
+
+
+def fetch_arxiv_metadata(arxiv_id: str, version: int | None) -> dict[str, Any]:
+    try:
+        data, _ = request_bytes(f"https://export.arxiv.org/api/query?id_list={arxiv_id}", timeout=10, retries=0)
+        return parse_atom(data, arxiv_id, version)
+    except (ArcaError, ET.ParseError):
+        suffix = f"v{version}" if version else ""
+        fallbacks = [
+            (f"https://arxiv.org/abs/{arxiv_id}{suffix}", 10),
+            (f"https://ar5iv.labs.arxiv.org/html/{arxiv_id}{suffix}", 25),
+        ]
+        failures = []
+        for url, timeout in fallbacks:
+            try:
+                data, _ = request_bytes(url, timeout=timeout, retries=0)
+                return parse_html_metadata(data, arxiv_id, version)
+            except ArcaError as exc:
+                failures.append(str(exc))
+        raise ArcaError("unable to fetch arXiv metadata; " + "; ".join(failures))
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def validate_pdf(path: Path) -> dict[str, Any]:
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        prefix = handle.read(5)
+    if size <= 10 * 1024:
+        raise ArcaError(f"rejected PDF smaller than 10 KiB: {size} bytes")
+    if prefix != b"%PDF-":
+        raise ArcaError("rejected file that does not begin with %PDF-")
+    return {"path": "paper.pdf", "sha256": sha256_file(path), "bytes": size, "mime": "application/pdf"}
+
+
+def download_pdf(url: str, destination: Path) -> dict[str, Any]:
+    data, _ = request_bytes(url, timeout=90)
+    temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.part")
+    try:
+        atomic_write(temporary, data)
+        info = validate_pdf(temporary)
+        os.replace(temporary, destination)
+        return info
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            temporary.unlink()
+
+
+def merge_refresh(existing: dict[str, Any], fresh: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(existing)
+    for key in ("schema_version", "id", "type", "title", "authors", "abstract", "published", "updated", "source"):
+        if key in fresh:
+            merged[key] = fresh[key]
+    merged["updated_at"] = now()
+    return merged
+
+
+def add_paper(root: Path, raw: str, no_pdf: bool, refresh: bool, tags: list[str], source_note: str | None) -> dict[str, Any]:
+    arxiv_id, version = parse_arxiv(raw)
+    key = paper_key(arxiv_id)
+    destination = root / "papers" / key
+    existing = read_json(destination / "metadata.json") if (destination / "metadata.json").exists() else None
+    if existing and not refresh:
+        raise ArcaError(f"paper already exists: {arxiv_id}; use --refresh to update")
+    fresh = fetch_arxiv_metadata(arxiv_id, version)
+    record = merge_refresh(existing, fresh) if existing else fresh
+    record["tags"] = sorted(set(record.get("tags", [])) | set(tags))
+    if source_note:
+        record.setdefault("provenance", []).append({"kind": "source-note", "note": source_note, "added_at": now()})
+    if existing:
+        if not no_pdf:
+            info = download_pdf(record["source"]["pdf_url"], destination / "paper.pdf")
+            record.setdefault("files", {})["pdf"] = info
+        write_json(destination / "metadata.json", record)
+        return record
+    stage = root / ".staging" / f"{key}-{uuid.uuid4().hex}"
+    stage.mkdir(parents=True)
+    try:
+        (stage / "notes").mkdir()
+        write_text(stage / "notes" / "summary.md", f"# Notes — {record['title']}\n\n")
+        write_text(stage / "notes" / "annotations.jsonl", "")
+        if not no_pdf:
+            record["files"]["pdf"] = download_pdf(record["source"]["pdf_url"], stage / "paper.pdf")
+        write_json(stage / "metadata.json", record)
+        os.replace(stage, destination)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    return record
+
+
+def ingest(root: Path, metadata_path: Path, pdf_path: Path | None) -> dict[str, Any]:
+    record = read_json(metadata_path)
+    errors = validate_record(record)
+    if errors:
+        raise ArcaError("invalid metadata: " + "; ".join(errors))
+    source = record["source"]
+    key = paper_key(str(source["id"]), str(source["provider"]))
+    destination = root / "papers" / key
+    if destination.exists():
+        raise ArcaError(f"paper already exists: {record['id']}")
+    stage = root / ".staging" / f"{key}-{uuid.uuid4().hex}"
+    stage.mkdir(parents=True)
+    try:
+        (stage / "notes").mkdir()
+        write_text(stage / "notes" / "summary.md", f"# Notes — {record['title']}\n\n")
+        write_text(stage / "notes" / "annotations.jsonl", "")
+        if pdf_path:
+            shutil.copyfile(pdf_path, stage / "paper.pdf")
+            record.setdefault("files", {})["pdf"] = validate_pdf(stage / "paper.pdf")
+        record["updated_at"] = now()
+        write_json(stage / "metadata.json", record)
+        os.replace(stage, destination)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    return record
+
+
+def select_rows(root: Path, status: str | None = None, tag: str | None = None, query: str | None = None) -> list[dict[str, Any]]:
+    selected = []
+    needle = query.casefold() if query else None
+    for directory, record in records(root):
+        if status and record.get("status") != status:
+            continue
+        if tag and tag not in record.get("tags", []):
+            continue
+        if needle:
+            haystack = "\n".join([
+                str(record.get("id", "")), str(record.get("title", "")),
+                str(record.get("abstract", "")), " ".join(author_names(record)),
+                " ".join(record.get("tags", [])), " ".join(record.get("collections", [])),
+                notes_text(directory),
+            ]).casefold()
+            if needle not in haystack:
+                continue
+        selected.append(index_row(directory, record))
+    selected.sort(key=lambda row: (str(row.get("updated_at", "")), str(row.get("id", ""))), reverse=True)
+    return selected
+
+
+def append_note(directory: Path, text: str) -> None:
+    path = note_path(directory)
+    current = path.read_text(encoding="utf-8") if path.exists() else ""
+    if current and not current.endswith("\n"):
+        current += "\n"
+    current += f"\n## {now()}\n\n{text.strip()}\n"
+    write_text(path, current)
+
+
+def append_annotation(directory: Path, page: int | None, quote: str | None, comment: str, tags: list[str]) -> dict[str, Any]:
+    annotation = {
+        "schema_version": SCHEMA_VERSION,
+        "id": str(uuid.uuid4()),
+        "page": page,
+        "quote": quote,
+        "comment": comment,
+        "tags": sorted(set(tags)),
+        "created_at": now(),
+        "updated_at": now(),
+    }
+    path = directory / "notes" / "annotations.jsonl"
+    rows = read_jsonl(path)
+    rows.append(annotation)
+    write_jsonl(path, rows)
+    return annotation
+
+
+def read_edges(root: Path) -> list[dict[str, Any]]:
+    return read_jsonl(root / "graph" / "edges.jsonl")
+
+
+def write_edges(root: Path, edges: list[dict[str, Any]]) -> None:
+    edges.sort(key=lambda edge: str(edge.get("id", "")))
+    write_jsonl(root / "graph" / "edges.jsonl", edges)
+
+
+def graph_subset(root: Path, center: str | None, depth: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    all_records = {record["id"]: record for _, record in records(root)}
+    edges = read_edges(root)
+    if not center:
+        return list(all_records.values()), edges
+    _, center_record = locate(root, center)
+    keep = {center_record["id"]}
+    frontier = set(keep)
+    for _ in range(max(depth, 0)):
+        next_frontier: set[str] = set()
+        for edge in edges:
+            if edge.get("from") in frontier:
+                next_frontier.add(edge.get("to"))
+            if edge.get("to") in frontier:
+                next_frontier.add(edge.get("from"))
+        next_frontier.discard(None)  # type: ignore[arg-type]
+        keep.update(next_frontier)
+        frontier = next_frontier
+    return [record for paper_id, record in all_records.items() if paper_id in keep], [edge for edge in edges if edge.get("from") in keep and edge.get("to") in keep]
+
+
+def dot_graph(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
+    def quoted(value: object) -> str:
+        return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"'
+    lines = ["digraph papers {", "  rankdir=LR;", "  node [shape=box, style=rounded];"]
+    for record in sorted(nodes, key=lambda item: item["id"]):
+        title = record.get("title", record["id"])
+        if len(title) > 64:
+            title = title[:61] + "..."
+        lines.append(f"  {quoted(record['id'])} [label={quoted(title)}];")
+    for edge in edges:
+        connector = "->"
+        attrs = [f"label={quoted(edge.get('type', 'related'))}"]
+        if not edge.get("directed", True):
+            attrs.append("dir=none")
+        lines.append(f"  {quoted(edge.get('from'))} {connector} {quoted(edge.get('to'))} [{', '.join(attrs)}];")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def paper_year(record: dict[str, Any]) -> int | None:
+    published = str(record.get("published", ""))
+    match = re.search(r"\b((?:19|20)\d{2})\b", published)
+    if match:
+        return int(match.group(1))
+    source_id = str(record.get("source", {}).get("id", ""))
+    modern_arxiv = re.match(r"^(\d{2})\d{2}\.\d{4,5}", source_id)
+    if modern_arxiv:
+        prefix = int(modern_arxiv.group(1))
+        return 2000 + prefix if prefix < 91 else 1900 + prefix
+    match = re.search(r"\b((?:19|20)\d{2})\b", source_id)
+    return int(match.group(1)) if match else None
+
+
+TEXT_WORD_RE = re.compile(r"[a-z0-9]+", re.I)
+TEXT_STOP = {
+    "a", "an", "and", "as", "at", "by", "for", "from", "in", "is", "of",
+    "on", "the", "to", "towards", "via", "with", "large", "language", "model",
+    "models", "llm", "llms", "learning", "reinforcement", "agent", "agents",
+    "we", "our", "this", "that", "these", "those", "be", "been", "are",
+    "was", "were", "it", "its", "can", "may", "using", "use", "used",
+    "new", "novel", "paper", "method", "methods", "approach", "results",
+    "show", "shows", "propose", "proposed", "based", "large-scale",
+}
+
+
+def text_tokens(value: str) -> list[str]:
+    return [token.lower() for token in TEXT_WORD_RE.findall(value) if len(token) > 2 and token.lower() not in TEXT_STOP]
+
+
+def text_feature_counts(record: dict[str, Any]) -> Counter:
+    title = text_tokens(str(record.get("title", "")))
+    abstract = text_tokens(str(record.get("abstract", "")))
+    features: Counter = Counter()
+    features.update({token: count * 3 for token, count in Counter(title).items()})
+    features.update(Counter(abstract))
+    features.update({f"title::{left}_{right}": 3 for left, right in zip(title, title[1:])})
+    features.update(f"abstract::{left}_{right}" for left, right in zip(abstract, abstract[1:]))
+    return features
+
+
+def text_similarity_edges(graph_nodes: list[dict[str, Any]], neighbors: int = 4, minimum: float = 0.05) -> list[dict[str, Any]]:
+    raw = {str(record["id"]): text_feature_counts(record) for record in graph_nodes}
+    document_frequency = Counter(feature for counts in raw.values() for feature in counts)
+    total = len(raw)
+    vectors: dict[str, dict[str, float]] = {}
+    for paper_id, counts in raw.items():
+        weighted = {
+            feature: (1.0 + math.log(count)) * (math.log((total + 1) / (document_frequency[feature] + 1)) + 1.0)
+            for feature, count in counts.items()
+        }
+        norm = math.sqrt(sum(value * value for value in weighted.values())) or 1.0
+        vectors[paper_id] = {feature: value / norm for feature, value in weighted.items()}
+
+    candidates: dict[str, list[tuple[float, str]]] = {paper_id: [] for paper_id in vectors}
+    paper_ids = sorted(vectors)
+    for index, left in enumerate(paper_ids):
+        for right in paper_ids[index + 1 :]:
+            left_vector, right_vector = vectors[left], vectors[right]
+            if len(left_vector) > len(right_vector):
+                left_vector, right_vector = right_vector, left_vector
+            score = sum(value * right_vector.get(feature, 0.0) for feature, value in left_vector.items())
+            if score >= minimum:
+                candidates[left].append((score, right))
+                candidates[right].append((score, left))
+    pairs: dict[tuple[str, str], float] = {}
+    for paper_id, ranked in candidates.items():
+        for score, other in sorted(ranked, reverse=True)[:neighbors]:
+            pair = tuple(sorted((paper_id, other)))
+            pairs[pair] = max(score, pairs.get(pair, 0.0))
+    return [
+        {
+            "source": left,
+            "target": right,
+            "type": "text-similarity",
+            "directed": False,
+            "weight": round(score, 4),
+            "origin": "title + abstract TF-IDF cosine",
+        }
+        for (left, right), score in sorted(pairs.items())
+    ]
+
+
+def cached_citation_edges(root: Path, graph_nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cache_path = root / "_index" / "citation-cache.json"
+    if not cache_path.exists():
+        return []
+    try:
+        works = json.loads(cache_path.read_text(encoding="utf-8")).get("works", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+    known = {str(record["id"]) for record in graph_nodes}
+    by_arxiv = {
+        str(row.get("external_ids", {}).get("ArXiv")): row["local_id"]
+        for row in works
+        if row.get("external_ids", {}).get("ArXiv")
+    }
+    by_doi = {
+        str(row.get("external_ids", {}).get("DOI", "")).lower(): row["local_id"]
+        for row in works
+        if row.get("external_ids", {}).get("DOI")
+    }
+    by_s2 = {row["paper_id"]: row["local_id"] for row in works if row.get("paper_id")}
+    pairs = set()
+    for row in works:
+        source = row.get("local_id")
+        if source not in known:
+            continue
+        for reference in row.get("references", []):
+            target = (
+                by_arxiv.get(str(reference.get("arxiv_id")))
+                or by_doi.get(str(reference.get("doi", "")).lower())
+                or by_s2.get(reference.get("paper_id"))
+            )
+            if target in known and target != source:
+                pairs.add((source, target))
+    return [
+        {
+            "source": source,
+            "target": target,
+            "type": "cites",
+            "directed": True,
+            "weight": 1.0,
+            "origin": "semantic-scholar reference graph",
+        }
+        for source, target in sorted(pairs)
+    ]
+
+
+def sync_semantic_scholar_citations(root: Path) -> dict[str, Any]:
+    selected = []
+    for _, record in records(root):
+        paper_id = str(record["id"])
+        source = record.get("source", {})
+        if re.fullmatch(r"\d{4}\.\d{4,5}", paper_id):
+            query = f"ARXIV:{paper_id}"
+        elif source.get("doi"):
+            query = f"DOI:{source['doi']}"
+        else:
+            continue
+        selected.append({"local_id": paper_id, "query": query})
+
+    endpoint = "https://api.semanticscholar.org/graph/v1/paper/batch"
+    fields = "paperId,externalIds,references.paperId,references.externalIds"
+    works = []
+    for start in range(0, len(selected), 75):
+        group = selected[start : start + 75]
+        url = f"{endpoint}?{urllib.parse.urlencode({'fields': fields})}"
+        body = json.dumps({"ids": [row["query"] for row in group]}).encode("utf-8")
+        response = None
+        for attempt in range(5):
+            try:
+                request = Request(
+                    url,
+                    data=body,
+                    method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": "Arca-paper-graph/1.0 (local research library)",
+                    },
+                )
+                with urlopen(request, timeout=120) as handle:
+                    response = json.loads(handle.read())
+                break
+            except (HTTPError, URLError, TimeoutError, OSError) as exc:
+                if attempt == 4 or isinstance(exc, HTTPError) and exc.code not in {429, 500, 502, 503, 504}:
+                    raise ArcaError(f"Semantic Scholar citation sync failed: {exc}") from exc
+                time.sleep(2 ** attempt + 1)
+        if response is None or len(response) != len(group):
+            raise ArcaError("Semantic Scholar citation sync returned an invalid batch")
+        for source_row, result in zip(group, response):
+            if result is None:
+                works.append({**source_row, "paper_id": None, "external_ids": {}, "references": []})
+                continue
+            references = []
+            for reference in result.get("references") or []:
+                if not reference or not reference.get("paperId"):
+                    continue
+                external = reference.get("externalIds") or {}
+                references.append({
+                    "paper_id": reference.get("paperId"),
+                    "arxiv_id": external.get("ArXiv"),
+                    "doi": external.get("DOI"),
+                })
+            works.append({
+                **source_row,
+                "paper_id": result.get("paperId"),
+                "external_ids": result.get("externalIds") or {},
+                "references": references,
+            })
+        if start + 75 < len(selected):
+            time.sleep(2.2)
+
+    payload = {
+        "schema_version": 1,
+        "generated_at": now(),
+        "provider": "semantic-scholar",
+        "provider_url": "https://api.semanticscholar.org/graph/v1",
+        "works": works,
+    }
+    write_json(root / "_index" / "citation-cache.json", payload)
+    return {
+        "papers": len(works),
+        "resolved": sum(bool(row["paper_id"]) for row in works),
+        "references": sum(len(row["references"]) for row in works),
+        "cache": str(root / "_index" / "citation-cache.json"),
+    }
+
+
+def visualization_payload(root: Path, center: str | None, depth: int) -> dict[str, Any]:
+    graph_nodes = [record for _, record in records(root)]
+    citation_edges = cached_citation_edges(root, graph_nodes)
+    citation_pairs = {tuple(sorted((edge["source"], edge["target"]))) for edge in citation_edges}
+    text_edges = [
+        edge
+        for edge in text_similarity_edges(graph_nodes)
+        if tuple(sorted((edge["source"], edge["target"]))) not in citation_pairs
+    ]
+    graph_edges = citation_edges + text_edges
+    if center:
+        _, center_record = locate(root, center)
+        keep = {str(center_record["id"])}
+        frontier = set(keep)
+        for _ in range(max(depth, 0)):
+            next_frontier: set[str] = set()
+            for edge in graph_edges:
+                if edge["source"] in frontier:
+                    next_frontier.add(edge["target"])
+                if edge["target"] in frontier:
+                    next_frontier.add(edge["source"])
+            keep.update(next_frontier)
+            frontier = next_frontier
+        graph_nodes = [record for record in graph_nodes if str(record["id"]) in keep]
+        graph_edges = [edge for edge in graph_edges if edge["source"] in keep and edge["target"] in keep]
+    known_ids = {str(record.get("id")) for record in graph_nodes}
+    edges = [
+        {
+            "source": edge.get("source"),
+            "target": edge.get("target"),
+            "type": edge.get("type", "text-similarity"),
+            "directed": bool(edge.get("directed", False)),
+            "weight": edge.get("weight", 0.0),
+        }
+        for edge in graph_edges
+        if edge.get("source") in known_ids and edge.get("target") in known_ids
+    ]
+    degrees: dict[str, int] = {paper_id: 0 for paper_id in known_ids}
+    cites: dict[str, int] = {paper_id: 0 for paper_id in known_ids}
+    cited_by: dict[str, int] = {paper_id: 0 for paper_id in known_ids}
+    text_degree: dict[str, int] = {paper_id: 0 for paper_id in known_ids}
+    for edge in edges:
+        degrees[str(edge["source"])] += 1
+        degrees[str(edge["target"])] += 1
+        if edge["type"] == "cites":
+            cites[str(edge["source"])] += 1
+            cited_by[str(edge["target"])] += 1
+        else:
+            text_degree[str(edge["source"])] += 1
+            text_degree[str(edge["target"])] += 1
+
+    nodes = []
+    category_counts: dict[str, int] = {}
+    for record in sorted(graph_nodes, key=lambda item: str(item.get("id", ""))):
+        collections = [value for value in record.get("collections", []) if isinstance(value, str) and value.strip()]
+        category = collections[0] if collections else "未分类"
+        category_counts[category] = category_counts.get(category, 0) + 1
+        source_url = str(record.get("source", {}).get("url", ""))
+        if not re.match(r"^https?://", source_url, re.I):
+            source_url = ""
+        paper_id = str(record.get("id", ""))
+        nodes.append({
+            "id": paper_id,
+            "title": str(record.get("title", paper_id)),
+            "year": paper_year(record),
+            "collections": collections,
+            "category": category,
+            "degree": degrees.get(paper_id, 0),
+            "cites": cites.get(paper_id, 0),
+            "cited_by": cited_by.get(paper_id, 0),
+            "text_degree": text_degree.get(paper_id, 0),
+            "url": source_url,
+        })
+    categories = [
+        {"name": name, "count": count}
+        for name, count in sorted(category_counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    return {
+        "nodes": nodes,
+        "links": edges,
+        "categories": categories,
+        "edge_counts": {
+            "cites": sum(edge["type"] == "cites" for edge in edges),
+            "text_similarity": sum(edge["type"] == "text-similarity" for edge in edges),
+        },
+    }
+
+
+def render_visualization(
+    root: Path,
+    output: Path,
+    center: str | None,
+    depth: int,
+    title: str,
+    allow_overwrite: bool,
+) -> Path:
+    if output.exists() and not allow_overwrite:
+        raise ArcaError(f"output already exists; use --force to replace it: {output}")
+    package_root = Path(__file__).resolve().parent
+    template_path = package_root / "templates" / "default-visualization.html"
+    d3_path = package_root / "vendor" / "d3.v7.min.js"
+    if not template_path.exists() or not d3_path.exists():
+        raise ArcaError("visualization assets are missing from the Arca package")
+    payload = visualization_payload(root, center, depth)
+    data_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    data_json = data_json.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    d3_source = d3_path.read_text(encoding="utf-8").replace("</script>", "<\\/script>")
+    summary = (
+        f"{len(payload['nodes'])} 篇论文 · {payload['edge_counts']['cites']} 条引用关系 · "
+        f"{payload['edge_counts']['text_similarity']} 条文本相似关系 · {len(payload['categories'])} 个主题"
+    )
+    rendered = template_path.read_text(encoding="utf-8")
+    rendered = rendered.replace("__ARCA_TITLE_HTML__", html.escape(title))
+    rendered = rendered.replace("__ARCA_SUMMARY_HTML__", html.escape(summary))
+    rendered = rendered.replace("__ARCA_DATA_JSON__", data_json)
+    rendered = rendered.replace("__ARCA_D3_SOURCE__", d3_source)
+    if re.search(r"__ARCA_[A-Z_]+__", rendered):
+        raise ArcaError("visualization template contains an unresolved placeholder")
+    write_text(output, rendered)
+    return output
+
+
+def doctor(root: Path, full: bool) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    try:
+        require_library(root)
+    except ArcaError as exc:
+        return [str(exc)], warnings
+    known_ids: set[str] = set()
+    for directory in paper_dirs(root):
+        metadata = directory / "metadata.json"
+        if not metadata.exists():
+            warnings.append(f"paper directory has no metadata.json: {directory.name}")
+            continue
+        try:
+            record = read_json(metadata)
+        except ArcaError as exc:
+            errors.append(str(exc))
+            continue
+        known_ids.add(str(record.get("id")))
+        errors.extend(f"{directory.name}: {message}" for message in validate_record(record))
+        pdf_info = record.get("files", {}).get("pdf")
+        if pdf_info:
+            pdf = directory / str(pdf_info.get("path", "paper.pdf"))
+            if not pdf.exists():
+                errors.append(f"{directory.name}: declared PDF is missing")
+            else:
+                try:
+                    actual = validate_pdf(pdf)
+                    if actual["bytes"] != pdf_info.get("bytes"):
+                        errors.append(f"{directory.name}: PDF byte count mismatch")
+                    if full and actual["sha256"] != pdf_info.get("sha256"):
+                        errors.append(f"{directory.name}: PDF SHA-256 mismatch")
+                except ArcaError as exc:
+                    errors.append(f"{directory.name}: {exc}")
+        annotations = directory / "notes" / "annotations.jsonl"
+        try:
+            read_jsonl(annotations)
+        except ArcaError as exc:
+            errors.append(str(exc))
+    try:
+        for edge in read_edges(root):
+            for endpoint in ("from", "to"):
+                if edge.get(endpoint) not in known_ids:
+                    warnings.append(f"edge {edge.get('id')} has missing endpoint {edge.get(endpoint)}")
+            if edge.get("type") not in RELATIONS:
+                warnings.append(f"edge {edge.get('id')} uses custom relation {edge.get('type')}")
+    except ArcaError as exc:
+        errors.append(str(exc))
+    return errors, warnings
+
+
+def add_output_mode(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--json", action="store_const", dest="output", const="json")
+    group.add_argument("--jsonl", action="store_const", dest="output", const="jsonl")
+    parser.set_defaults(output="human")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="arca", description="Portable filesystem-native paper library")
+    parser.add_argument("--library", default=os.environ.get("ARCA_LIBRARY", "library"), help="library directory (default: library or ARCA_LIBRARY)")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    init = sub.add_parser("init", help="create a library")
+    init.add_argument("path", nargs="?", default=None)
+
+    add = sub.add_parser("add", help="fetch an arXiv paper")
+    add.add_argument("paper")
+    add.add_argument("--no-pdf", action="store_true")
+    add.add_argument("--refresh", action="store_true")
+    add.add_argument("--tag", action="append", default=[])
+    add.add_argument("--source-note")
+    add_output_mode(add)
+
+    ing = sub.add_parser("ingest", help="atomically ingest local metadata and PDF")
+    ing.add_argument("metadata")
+    ing.add_argument("--pdf")
+    add_output_mode(ing)
+
+    listing = sub.add_parser("list", help="list papers")
+    listing.add_argument("--status", choices=STATUSES)
+    listing.add_argument("--tag")
+    listing.add_argument("--limit", type=int)
+    add_output_mode(listing)
+
+    get = sub.add_parser("get", help="get one paper")
+    get.add_argument("paper")
+    add_output_mode(get)
+
+    search = sub.add_parser("search", help="search metadata and notes")
+    search.add_argument("query")
+    search.add_argument("--status", choices=STATUSES)
+    search.add_argument("--tag")
+    search.add_argument("--limit", type=int)
+    add_output_mode(search)
+
+    path = sub.add_parser("path", help="print a paper directory")
+    path.add_argument("paper")
+
+    update = sub.add_parser("update", help="update common metadata fields")
+    update.add_argument("paper")
+    update.add_argument("--status", choices=STATUSES)
+    update.add_argument("--title")
+    update.add_argument("--add-tag", action="append", default=[])
+    update.add_argument("--remove-tag", action="append", default=[])
+    update.add_argument("--add-collection", action="append", default=[])
+    update.add_argument("--remove-collection", action="append", default=[])
+    add_output_mode(update)
+
+    note = sub.add_parser("note", help="append a Markdown note")
+    note.add_argument("paper")
+    note.add_argument("text")
+
+    annotate = sub.add_parser("annotate", help="append a page-anchored annotation")
+    annotate.add_argument("paper")
+    annotate.add_argument("--comment", required=True)
+    annotate.add_argument("--page", type=int)
+    annotate.add_argument("--quote")
+    annotate.add_argument("--tag", action="append", default=[])
+    add_output_mode(annotate)
+
+    link = sub.add_parser("link", help="create a paper-graph edge")
+    link.add_argument("from_paper")
+    link.add_argument("relation", choices=RELATIONS)
+    link.add_argument("to_paper")
+    link.add_argument("--note")
+    link.add_argument("--undirected", action="store_true")
+    add_output_mode(link)
+
+    unlink = sub.add_parser("unlink", help="remove a graph edge")
+    unlink.add_argument("edge_id")
+
+    neighbors = sub.add_parser("neighbors", help="show a paper neighborhood")
+    neighbors.add_argument("paper")
+    neighbors.add_argument("--depth", type=int, default=1)
+    add_output_mode(neighbors)
+
+    graph = sub.add_parser("graph", help="export the paper graph")
+    graph.add_argument("--format", choices=("json", "jsonl", "dot"), default="json")
+    graph.add_argument("--center")
+    graph.add_argument("--depth", type=int, default=1)
+
+    visualize = sub.add_parser("visualize", help="generate the default interactive HTML graph")
+    visualize.add_argument("output", nargs="?", help="output HTML (default: library/_index/paper-graph.html)")
+    visualize.add_argument("--center", help="render only one paper neighborhood")
+    visualize.add_argument("--depth", type=int, default=1, help="neighborhood depth with --center (default: 1)")
+    visualize.add_argument("--title", default="Arca · 论文关系图")
+    visualize.add_argument("--force", action="store_true", help="replace an existing explicit output file")
+
+    sub.add_parser("citation-sync", help="refresh the free Semantic Scholar citation cache")
+
+    remove = sub.add_parser("remove", help="move a paper to trash")
+    remove.add_argument("paper")
+    remove.add_argument("--yes", action="store_true", required=True)
+
+    restore = sub.add_parser("restore", help="restore the newest matching trashed paper")
+    restore.add_argument("paper")
+
+    sub.add_parser("reindex", help="rebuild the generated JSONL index")
+    doc = sub.add_parser("doctor", help="validate the library")
+    doc.add_argument("--full", action="store_true", help="also recompute every PDF checksum")
+    add_output_mode(doc)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    root = library_root(args.path if args.command == "init" and args.path else args.library)
+    try:
+        if args.command == "init":
+            initialize(root)
+            print(root)
+            return 0
+        require_library(root)
+        if args.command in {"add", "ingest", "update", "note", "annotate", "link", "unlink", "visualize", "citation-sync", "remove", "restore", "reindex"}:
+            lock_context = write_lock(root)
+        else:
+            lock_context = contextlib.nullcontext()
+        with lock_context:
+            if args.command == "add":
+                record = add_paper(root, args.paper, args.no_pdf, args.refresh, args.tag, args.source_note)
+                rebuild_index(root)
+                print_rows([index_row(locate(root, record["id"])[0], record)], args.output)
+            elif args.command == "ingest":
+                record = ingest(root, Path(args.metadata).expanduser().resolve(), Path(args.pdf).expanduser().resolve() if args.pdf else None)
+                rebuild_index(root)
+                print_rows([index_row(locate(root, record["id"])[0], record)], args.output)
+            elif args.command == "list":
+                rows = select_rows(root, args.status, args.tag)
+                print_rows(rows[:args.limit] if args.limit else rows, args.output)
+            elif args.command == "get":
+                directory, record = locate(root, args.paper)
+                if args.output == "human":
+                    print(f"{record['title']}\nID: {record['id']}\nAuthors: {', '.join(author_names(record)) or 'Unknown'}\nStatus: {record['status']}\nPath: {directory}\nSource: {record['source']['url']}")
+                else:
+                    payload = dict(record)
+                    payload["local_path"] = str(directory)
+                    print_rows([payload], args.output)
+            elif args.command == "search":
+                rows = select_rows(root, args.status, args.tag, args.query)
+                print_rows(rows[:args.limit] if args.limit else rows, args.output)
+            elif args.command == "path":
+                directory, _ = locate(root, args.paper)
+                print(directory)
+            elif args.command == "update":
+                directory, record = locate(root, args.paper)
+                if args.status:
+                    record["status"] = args.status
+                if args.title:
+                    record["title"] = args.title
+                record["tags"] = sorted((set(record.get("tags", [])) | set(args.add_tag)) - set(args.remove_tag))
+                record["collections"] = sorted((set(record.get("collections", [])) | set(args.add_collection)) - set(args.remove_collection))
+                record["updated_at"] = now()
+                write_json(directory / "metadata.json", record)
+                rebuild_index(root)
+                print_rows([index_row(directory, record)], args.output)
+            elif args.command == "note":
+                directory, record = locate(root, args.paper)
+                append_note(directory, args.text)
+                record["updated_at"] = now()
+                write_json(directory / "metadata.json", record)
+                rebuild_index(root)
+                print(note_path(directory))
+            elif args.command == "annotate":
+                directory, record = locate(root, args.paper)
+                annotation = append_annotation(directory, args.page, args.quote, args.comment, args.tag)
+                record["updated_at"] = now()
+                write_json(directory / "metadata.json", record)
+                rebuild_index(root)
+                print_rows([annotation], args.output)
+            elif args.command == "link":
+                _, source = locate(root, args.from_paper)
+                _, target = locate(root, args.to_paper)
+                edge = {
+                    "schema_version": SCHEMA_VERSION,
+                    "id": str(uuid.uuid4()),
+                    "from": source["id"],
+                    "to": target["id"],
+                    "type": args.relation,
+                    "directed": not args.undirected,
+                    "note": args.note or "",
+                    "created_at": now(),
+                }
+                edges = read_edges(root)
+                duplicate = next((item for item in edges if all(item.get(k) == edge[k] for k in ("from", "to", "type"))), None)
+                if duplicate:
+                    raise ArcaError(f"edge already exists: {duplicate['id']}")
+                edges.append(edge)
+                write_edges(root, edges)
+                print_rows([edge], args.output)
+            elif args.command == "unlink":
+                edges = read_edges(root)
+                kept = [edge for edge in edges if edge.get("id") != args.edge_id]
+                if len(kept) == len(edges):
+                    raise ArcaError(f"edge not found: {args.edge_id}")
+                write_edges(root, kept)
+                print(args.edge_id)
+            elif args.command == "neighbors":
+                nodes, edges = graph_subset(root, args.paper, args.depth)
+                payload = {"nodes": [index_row(locate(root, item["id"])[0], item) for item in nodes], "edges": edges}
+                if args.output == "human":
+                    print(f"{len(nodes)} papers, {len(edges)} relations")
+                    for edge in edges:
+                        print(f"{edge['from']} --{edge['type']}--> {edge['to']}")
+                elif args.output == "json":
+                    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+                else:
+                    for edge in edges:
+                        print(json.dumps({"kind": "edge", **edge}, ensure_ascii=False, sort_keys=True))
+                    for node in payload["nodes"]:
+                        print(json.dumps({"kind": "node", **node}, ensure_ascii=False, sort_keys=True))
+            elif args.command == "graph":
+                nodes, edges = graph_subset(root, args.center, args.depth)
+                if args.format == "dot":
+                    print(dot_graph(nodes, edges), end="")
+                elif args.format == "jsonl":
+                    for edge in edges:
+                        print(json.dumps({"kind": "edge", **edge}, ensure_ascii=False, sort_keys=True))
+                    for record in nodes:
+                        print(json.dumps({"kind": "node", **index_row(locate(root, record["id"])[0], record)}, ensure_ascii=False, sort_keys=True))
+                else:
+                    print(json.dumps({"nodes": [index_row(locate(root, item["id"])[0], item) for item in nodes], "edges": edges}, ensure_ascii=False, indent=2, sort_keys=True))
+            elif args.command == "visualize":
+                output = Path(args.output).expanduser().resolve() if args.output else root / "_index" / "paper-graph.html"
+                generated = render_visualization(
+                    root, output, args.center, args.depth, args.title,
+                    allow_overwrite=(not args.output or args.force),
+                )
+                print(generated)
+            elif args.command == "citation-sync":
+                print(json.dumps(sync_semantic_scholar_citations(root), ensure_ascii=False, indent=2))
+            elif args.command == "remove":
+                directory, record = locate(root, args.paper)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                target = root / ".trash" / f"{directory.name}--{stamp}"
+                os.replace(directory, target)
+                rebuild_index(root)
+                print(target)
+            elif args.command == "restore":
+                key = paper_key(parse_arxiv(args.paper)[0]) if ARXIV_RE.search(args.paper) else args.paper
+                matches = sorted((root / ".trash").glob(f"{key}--*"), reverse=True)
+                if not matches:
+                    raise ArcaError(f"no trashed paper matches: {args.paper}")
+                target = root / "papers" / key
+                if target.exists():
+                    raise ArcaError(f"cannot restore over existing paper: {key}")
+                os.replace(matches[0], target)
+                rebuild_index(root)
+                print(target)
+            elif args.command == "reindex":
+                rows = rebuild_index(root)
+                print(f"indexed {len(rows)} papers")
+            elif args.command == "doctor":
+                errors, warnings = doctor(root, args.full)
+                payload = {"ok": not errors, "papers": len(records(root)), "edges": len(read_edges(root)), "errors": errors, "warnings": warnings}
+                if args.output == "human":
+                    print(f"{'OK' if not errors else 'FAILED'}: {payload['papers']} papers, {payload['edges']} relations, {len(warnings)} warnings, {len(errors)} errors")
+                    for warning in warnings:
+                        print(f"warning: {warning}")
+                    for error in errors:
+                        print(f"error: {error}")
+                else:
+                    print_rows([payload], args.output)
+                return 0 if not errors else 1
+        return 0
+    except (ArcaError, OSError, ValueError) as exc:
+        eprint(f"arca: {exc}")
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

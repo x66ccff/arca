@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arca.local/schema/annotation-v1.json",
+  "title": "Arca PDF annotation",
+  "type": "object",
+  "required": ["schema_version", "id", "comment", "tags", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "format": "uuid" },
+    "page": { "type": ["integer", "null"], "minimum": 1 },
+    "quote": { "type": ["string", "null"] },
+    "comment": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" }
+  },
+  "additionalProperties": true
+}
+

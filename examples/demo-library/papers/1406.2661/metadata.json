@@ -1,0 +1,62 @@
+{
+  "abstract": "We propose a new framework for estimating generative models via an adversarial process, in which we simultaneously train two models: a generative model G that captures the data distribution, and a discriminative model D that estimates the probability that a sample came from the training data rather than G. The training procedure for G is to maximize the probability of D making a mistake. This framework corresponds to a minimax two-player game. In the space of arbitrary functions G and D, a unique solution exists, with G recovering the training data distribution and D equal to 1/2 everywhere. In the case where G and D are defined by multilayer perceptrons, the entire system can be trained with backpropagation. There is no need for any Markov chains or unrolled approximate inference networks during either training or generation of samples. Experiments demonstrate the potential of the framework through qualitative and quantitative evaluation of the generated samples.",
+  "added_at": "2026-08-02T12:00:27Z",
+  "aliases": [],
+  "authors": [
+    {
+      "name": "Ian J. Goodfellow"
+    },
+    {
+      "name": "Jean Pouget-Abadie"
+    },
+    {
+      "name": "Mehdi Mirza"
+    },
+    {
+      "name": "Bing Xu"
+    },
+    {
+      "name": "David Warde-Farley"
+    },
+    {
+      "name": "Sherjil Ozair"
+    },
+    {
+      "name": "Aaron Courville"
+    },
+    {
+      "name": "Yoshua Bengio"
+    }
+  ],
+  "collections": [],
+  "custom": {},
+  "files": {
+    "pdf": null
+  },
+  "id": "1406.2661",
+  "provenance": [
+    {
+      "added_at": "2026-08-02T12:00:27Z",
+      "kind": "arxiv",
+      "ref": "1406.2661"
+    }
+  ],
+  "published": "2014-06-10",
+  "schema_version": 1,
+  "source": {
+    "id": "1406.2661",
+    "pdf_url": "https://arxiv.org/pdf/1406.2661v1.pdf",
+    "provider": "arxiv",
+    "url": "https://arxiv.org/abs/1406.2661v1",
+    "version": 1
+  },
+  "status": "inbox",
+  "tags": [
+    "demo",
+    "machine-learning"
+  ],
+  "title": "Generative Adversarial Networks",
+  "type": "preprint",
+  "updated": "2014-06-10",
+  "updated_at": "2026-08-02T12:00:27Z"
+}

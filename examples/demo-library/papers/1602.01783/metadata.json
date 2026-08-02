@@ -1,0 +1,62 @@
+{
+  "abstract": "We propose a conceptually simple and lightweight framework for deep reinforcement learning that uses asynchronous gradient descent for optimization of deep neural network controllers. We present asynchronous variants of four standard reinforcement learning algorithms and show that parallel actor-learners have a stabilizing effect on training allowing all four methods to successfully train neural network controllers. The best performing method, an asynchronous variant of actor-critic, surpasses the current state-of-the-art on the Atari domain while training for half the time on a single multi-core CPU instead of a GPU. Furthermore, we show that asynchronous actor-critic succeeds on a wide variety of continuous motor control problems as well as on a new task of navigating random 3D mazes using a visual input.",
+  "added_at": "2026-08-02T12:00:38Z",
+  "aliases": [],
+  "authors": [
+    {
+      "name": "Volodymyr Mnih"
+    },
+    {
+      "name": "Adrià Puigdomènech Badia"
+    },
+    {
+      "name": "Mehdi Mirza"
+    },
+    {
+      "name": "Alex Graves"
+    },
+    {
+      "name": "Timothy P. Lillicrap"
+    },
+    {
+      "name": "Tim Harley"
+    },
+    {
+      "name": "David Silver"
+    },
+    {
+      "name": "Koray Kavukcuoglu"
+    }
+  ],
+  "collections": [],
+  "custom": {},
+  "files": {
+    "pdf": null
+  },
+  "id": "1602.01783",
+  "provenance": [
+    {
+      "added_at": "2026-08-02T12:00:38Z",
+      "kind": "arxiv",
+      "ref": "1602.01783"
+    }
+  ],
+  "published": "2016-02-04",
+  "schema_version": 1,
+  "source": {
+    "id": "1602.01783",
+    "pdf_url": "https://arxiv.org/pdf/1602.01783v2.pdf",
+    "provider": "arxiv",
+    "url": "https://arxiv.org/abs/1602.01783v2",
+    "version": 2
+  },
+  "status": "inbox",
+  "tags": [
+    "demo",
+    "machine-learning"
+  ],
+  "title": "Asynchronous Methods for Deep Reinforcement Learning",
+  "type": "preprint",
+  "updated": "2016-06-16",
+  "updated_at": "2026-08-02T12:00:38Z"
+}

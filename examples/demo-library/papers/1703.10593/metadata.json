@@ -1,0 +1,50 @@
+{
+  "abstract": "Image-to-image translation is a class of vision and graphics problems where the goal is to learn the mapping between an input image and an output image using a training set of aligned image pairs. However, for many tasks, paired training data will not be available. We present an approach for learning to translate an image from a source domain $X$ to a target domain $Y$ in the absence of paired examples. Our goal is to learn a mapping $G: X \\rightarrow Y$ such that the distribution of images from $G(X)$ is indistinguishable from the distribution $Y$ using an adversarial loss. Because this mapping is highly under-constrained, we couple it with an inverse mapping $F: Y \\rightarrow X$ and introduce a cycle consistency loss to push $F(G(X)) \\approx X$ (and vice versa). Qualitative results are presented on several tasks where paired training data does not exist, including collection style transfer, object transfiguration, season transfer, photo enhancement, etc. Quantitative comparisons against several prior methods demonstrate the superiority of our approach.",
+  "added_at": "2026-08-02T12:00:39Z",
+  "aliases": [],
+  "authors": [
+    {
+      "name": "Jun-Yan Zhu"
+    },
+    {
+      "name": "Taesung Park"
+    },
+    {
+      "name": "Phillip Isola"
+    },
+    {
+      "name": "Alexei A. Efros"
+    }
+  ],
+  "collections": [],
+  "custom": {},
+  "files": {
+    "pdf": null
+  },
+  "id": "1703.10593",
+  "provenance": [
+    {
+      "added_at": "2026-08-02T12:00:39Z",
+      "kind": "arxiv",
+      "ref": "1703.10593"
+    }
+  ],
+  "published": "2017-03-30",
+  "schema_version": 1,
+  "source": {
+    "id": "1703.10593",
+    "pdf_url": "https://arxiv.org/pdf/1703.10593v7.pdf",
+    "provider": "arxiv",
+    "url": "https://arxiv.org/abs/1703.10593v7",
+    "version": 7
+  },
+  "status": "inbox",
+  "tags": [
+    "demo",
+    "machine-learning"
+  ],
+  "title": "Unpaired Image-to-Image Translation using Cycle-Consistent Adversarial Networks",
+  "type": "preprint",
+  "updated": "2020-08-24",
+  "updated_at": "2026-08-02T12:00:39Z"
+}
