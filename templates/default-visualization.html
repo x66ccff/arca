@@ -142,7 +142,9 @@
     <span class="encoding-arrow" aria-hidden="true">→</span>
     <span class="encoding-item"><span class="encoding-dot new-dot" aria-hidden="true"></span>较新，更不透明</span>
     <span class="encoding-divider" aria-hidden="true">·</span>
-    <span>直径越大，总度数越高</span>
+    <span>直径越大，被引次数越高</span>
+    <span class="encoding-divider" aria-hidden="true">·</span>
+    <span>年代力场：旧文献靠左，新文献靠右</span>
     <span class="encoding-divider" aria-hidden="true">·</span>
     <span class="edge-key citation-key">引用关系</span>
     <span class="edge-key similarity-key">标题＋摘要相似</span>
@@ -151,7 +153,7 @@
   <div class="graph-stage">
     <svg viewBox="0 0 1000 620" role="img" aria-labelledby="graph-title graph-description">
       <title id="graph-title">__ARCA_TITLE_HTML__</title>
-      <desc id="graph-description">实线箭头表示引用，虚线表示标题与摘要的文本相似关系；虚线的布局力更弱。</desc>
+      <desc id="graph-description">实线箭头表示引用，虚线表示标题与摘要的文本相似关系；旧论文受到向左的年份力，新论文受到向右的年份力。</desc>
       <defs><marker id="arca-citation-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs>
       <g class="zoom-layer">
         <g class="links"></g>
@@ -164,7 +166,7 @@
   </div>
   <div class="selection" aria-live="polite">
     <div class="selection-title">点击任一节点查看论文</div>
-    <div class="selection-meta">缩小时只标高度数节点；放大后自动增加标签并显示标题。</div>
+    <div class="selection-meta">缩小时优先标注高被引节点；放大后自动增加标签并显示标题。</div>
     <div class="selection-neighbors"></div>
     <a class="selection-link" hidden target="_blank" rel="noopener noreferrer">打开论文页面</a>
   </div>
@@ -193,7 +195,7 @@ __ARCA_D3_SOURCE__
   const shorten = (value, limit) => value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
   dataset.nodes.forEach((node, index) => {
     node._index = index;
-    node._radius = Math.min(20, 4.2 + Math.sqrt(node.degree) * 1.7);
+    node._radius = Math.min(20, 4.2 + Math.sqrt(node.cited_by) * 1.7);
     node._labelText = [
       node.id,
       `${node.id} · ${shorten(node.title, 26)}`,
@@ -203,7 +205,7 @@ __ARCA_D3_SOURCE__
   });
   const nodeRadius = node => node._radius;
   const rankedNodes = [...dataset.nodes].sort((left, right) =>
-    right.degree - left.degree || left.id.localeCompare(right.id)
+    right.cited_by - left.cited_by || left.id.localeCompare(right.id)
   );
 
   const legend = root.querySelector('.legend');
@@ -234,6 +236,13 @@ __ARCA_D3_SOURCE__
   const height = 620;
   const centerX = width / 2;
   const centerY = height / 2;
+  const yearFieldPadding = 72;
+  const yearPosition = year => {
+    const value = Number(year);
+    if (!Number.isFinite(value) || yearMax === yearMin) return centerX;
+    const progress = (value - yearMin) / (yearMax - yearMin);
+    return yearFieldPadding + progress * (width - yearFieldPadding * 2);
+  };
   const anchorRadiusX = 330;
   const anchorRadiusY = 220;
   const anchors = new Map(dataset.categories.map((category, index) => {
@@ -420,7 +429,9 @@ __ARCA_D3_SOURCE__
       .strength(edge => edge.type === 'cites' ? 0.46 : 0.065))
     .force('charge', d3.forceManyBody().strength(-112))
     .force('collision', d3.forceCollide().radius(node => nodeRadius(node) + 5))
-    .force('x', d3.forceX(node => (anchors.get(node.category) || {x: centerX}).x).strength(0.075))
+    .force('category-x', d3.forceX(node => (anchors.get(node.category) || {x: centerX}).x).strength(0.02))
+    .force('year-x', d3.forceX(node => yearPosition(node.year))
+      .strength(node => Number.isFinite(Number(node.year)) ? 0.18 : 0.04))
     .force('y', d3.forceY(node => (anchors.get(node.category) || {y: centerY}).y).strength(0.075))
     .force('center', d3.forceCenter(centerX, centerY))
     .on('tick', () => {
