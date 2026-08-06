@@ -6,7 +6,13 @@
 CLI 只是一个参考客户端。
 
 <p align="center">
-  <img src="assets/arca-demo.gif" width="960" alt="Arca 使用二十篇真实机器学习论文生成交互式关系图">
+  <a href="https://x66ccff.github.io/arca/">
+    <img src="assets/arca-demo.gif" width="960" alt="Arca 使用二十篇真实机器学习论文生成交互式关系图">
+  </a>
+</p>
+
+<p align="center">
+  <strong><a href="https://x66ccff.github.io/arca/">打开交互式 Demo →</a></strong>
 </p>
 
 ## 快速开始
@@ -77,6 +83,9 @@ Python 3.9+；任何语言都可以直接读写规范中的 JSON、JSONL、Markd
 Word2Vec、GAN、ResNet、PPO、Transformer、BERT、DDPM、ViT 和 CLIP 等工作。
 示例库不包含 PDF。
 
+无需安装即可[打开在线交互图谱](https://x66ccff.github.io/arca/)，也可以用下面的
+命令在本地生成相同的独立页面：
+
 ```bash
 ./arca --library examples/demo-library list
 ./arca --library examples/demo-library search "residual" --jsonl
@@ -108,9 +117,10 @@ library/
 ## 可视化
 
 带方向的实线表示由免费 Semantic Scholar API 获取的引用关系。较弱的虚线由
-标题和摘要在本地计算得出。节点越大表示连接越多，越新的论文越不透明。缩放时
-会逐步显示更多标签，点击节点可以突出其相邻论文。完成 `citation-sync` 后，
-可视化本身不需要联网。
+标题和摘要在本地计算得出。节点越大表示被引次数越多，越新的论文越不透明。
+横向年份力场会把旧论文拉向左侧、新论文拉向右侧，同时保留引用与主题聚类力。
+缩放时会逐步显示更多标签，点击节点可以突出其相邻论文。完成 `citation-sync`
+后，可视化本身不需要联网。
 
 ## 许可证
 
