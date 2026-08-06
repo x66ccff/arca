@@ -6,7 +6,13 @@ A portable, filesystem-native paper library for humans and agents. The folder
 is the database; the CLI is only a reference client.
 
 <p align="center">
-  <img src="assets/arca-demo.gif" width="960" alt="Arca generating an interactive graph from twenty real machine-learning papers">
+  <a href="https://x66ccff.github.io/arca/">
+    <img src="assets/arca-demo.gif" width="960" alt="Arca generating an interactive graph from twenty real machine-learning papers">
+  </a>
+</p>
+
+<p align="center">
+  <strong><a href="https://x66ccff.github.io/arca/">Open the interactive demo →</a></strong>
 </p>
 
 ## Quick start
@@ -80,6 +86,9 @@ Run `./arca --help` or `./arca COMMAND --help` for the complete CLI reference.
 machine-learning papers—from Word2Vec, GAN, ResNet, and PPO to Transformer,
 BERT, DDPM, ViT, and CLIP. It contains no PDFs.
 
+[Open the hosted interactive graph](https://x66ccff.github.io/arca/) without
+installing anything, or generate the same standalone page locally:
+
 ```bash
 ./arca --library examples/demo-library list
 ./arca --library examples/demo-library search "residual" --jsonl
@@ -112,9 +121,11 @@ JSON schemas in [`schema/`](schema/) for the language-neutral format.
 
 Solid directed edges are citations fetched from the free Semantic Scholar API.
 Dashed, weaker edges are computed locally from titles and abstracts. Node size
-tracks degree; newer papers are more opaque. Zooming reveals progressively more
-labels, and clicking a node highlights its neighbors. Visualization remains
-offline after `citation-sync`.
+tracks incoming citation count; newer papers are more opaque. A horizontal year
+force draws older papers left and newer papers right while preserving citation
+and topic forces. Zooming reveals progressively more labels, and clicking a
+node highlights its neighbors. Visualization remains offline after
+`citation-sync`.
 
 ## License
 
