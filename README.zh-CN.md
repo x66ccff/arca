@@ -24,6 +24,7 @@ cd arca
 ./arca init library
 ./arca --library library add 1706.03762
 ./arca --library library search "attention" --jsonl
+./arca --library library star 1706.03762
 ./arca --library library citation-sync
 ./arca --library library visualize
 ```
@@ -38,8 +39,10 @@ cd arca
 - 用普通文件夹保存元数据、PDF、笔记、标注和论文关系。
 - 通过 arXiv ID 或 URL 直接导入论文。
 - 支持稳定的文本、JSON 和 JSONL 本地查询输出。
+- 保存可移植的星标，以及经过人工审核、最长 30 字符的精简注记。
 - 连接不同论文，形成可移植、可编辑的知识图谱。
 - 生成包含引用关系和标题/摘要相似关系的交互式关系图。
+- 显示引用同步覆盖情况，并在本地服务模式提供一键刷新。
 - 使用原子写入、PDF 校验，并将删除的内容移动到 `.trash/`。
 
 不需要数据库、服务器、账号或包管理器。本地搜索、笔记、图导出和可视化均可
@@ -57,6 +60,9 @@ Python 3.9+；任何语言都可以直接读写规范中的 JSON、JSONL、Markd
 
 # 整理
 ./arca --library library update 1706.03762 --status key --add-tag attention
+./arca --library library star 1706.03762
+./arca --library library remark 1706.03762 --text "注意力架构的核心基线"
+./arca --library library list --starred
 ./arca --library library note 1706.03762 "Canonical Transformer paper."
 ./arca --library library annotate 1706.03762 --page 3 --quote "..." --comment "Core architecture"
 
@@ -121,6 +127,23 @@ library/
 横向年份力场会把旧论文拉向左侧、新论文拉向右侧，同时保留引用与主题聚类力。
 缩放时会逐步显示更多标签，点击节点可以突出其相邻论文。完成 `citation-sync`
 后，可视化本身不需要联网。
+
+星标论文会显示克制的金色微光，并优先出现在概览标签中；经过审核的精简注记会
+显示在悬浮提示和选中面板里。页面顶部还会显示缓存新鲜度、已解析论文覆盖率和
+库内引用边数量。
+
+通过 `file://` 打开的独立页面仍会显示同步状态，但静态 HTML 无法执行本机命令，
+因此同步按钮会被禁用。启动可选的本机回环服务后，即可一键调用 Semantic Scholar：
+
+```bash
+./arca --library library serve --open
+```
+
+该服务只绑定 `127.0.0.1`，仅提供生成的图谱和同步 API，不会暴露 PDF、笔记或
+规范元数据。写操作需要每个进程独立的同源令牌，并校验回环 Host 和 Origin。
+
+`remark` 每次设置或清空时都会在终端显示待写文本和字符数，审核者必须输入
+`确认`；不存在非交互式跳过审核的参数。
 
 ## 许可证
 

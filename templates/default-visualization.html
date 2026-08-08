@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>__ARCA_TITLE_HTML__</title>
   <style>
     :root {
@@ -20,6 +20,8 @@
       --series-4: light-dark(rgb(214 92 157), rgb(240 143 192));
       --series-5: light-dark(rgb(131 95 224), rgb(170 145 239));
       --series-6: light-dark(rgb(42 158 151), rgb(90 203 194));
+      --star: light-dark(rgb(202 138 4), rgb(250 204 21));
+      --star-glow: light-dark(rgb(234 179 8 / 42%), rgb(250 204 21 / 48%));
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     * { box-sizing: border-box; }
@@ -30,9 +32,50 @@
       background: var(--background);
     }
     main { width: 100%; }
-    header { margin-bottom: 0.75rem; }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
     h1 { margin: 0; font-size: 1.35rem; font-weight: 600; }
     header p { margin: 0.25rem 0 0; color: var(--muted-foreground); }
+    .sync-panel {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      min-width: min(100%, 370px);
+      padding: 0.55rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 0.7rem;
+      background: var(--card);
+    }
+    .sync-copy { min-width: 0; flex: 1; }
+    .sync-title { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; }
+    .sync-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--muted-foreground); }
+    .sync-panel[data-state="current"] .sync-dot { background: var(--series-3); box-shadow: 0 0 0.28rem rgb(70 177 96 / 32%); }
+    .sync-panel[data-state="incomplete"] .sync-dot,
+    .sync-panel[data-state="stale"] .sync-dot { background: var(--series-2); }
+    .sync-panel[data-state="syncing"] .sync-dot { background: var(--series-1); animation: sync-pulse 1s ease-in-out infinite; }
+    .sync-panel[data-state="error"] .sync-dot,
+    .sync-panel[data-state="invalid"] .sync-dot { background: rgb(220 76 76); }
+    .sync-detail { margin-top: 0.18rem; color: var(--muted-foreground); font-size: 0.72rem; line-height: 1.3; }
+    .sync-button {
+      flex: 0 0 auto;
+      min-width: 5.4rem;
+      padding: 0.42rem 0.62rem;
+      border: 1px solid var(--border);
+      border-radius: 0.55rem;
+      color: var(--foreground);
+      background: var(--background);
+      font: inherit;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .sync-button:hover:not(:disabled) { border-color: var(--series-1); }
+    .sync-button:disabled { cursor: not-allowed; opacity: 0.52; }
+    @keyframes sync-pulse { 50% { opacity: 0.35; } }
     .legend, .encoding {
       display: flex;
       align-items: center;
@@ -55,6 +98,12 @@
     .encoding-dot { background: var(--series-1); }
     .old-dot { width: 0.5rem; height: 0.5rem; opacity: 0.24; }
     .new-dot { width: 0.82rem; height: 0.82rem; opacity: 0.98; }
+    .star-dot {
+      width: 0.72rem;
+      height: 0.72rem;
+      background: var(--star);
+      box-shadow: 0 0 0.32rem var(--star-glow);
+    }
     .encoding-arrow, .encoding-divider { color: var(--muted-foreground); }
     .edge-key { display: inline-flex; align-items: center; gap: 0.35rem; }
     .edge-key::before { content: ""; display: inline-block; width: 1.9rem; border-top: 1.5px solid var(--foreground); }
@@ -84,6 +133,13 @@
       transition: opacity 140ms ease, stroke-width 140ms ease;
     }
     .node.selected { stroke: var(--foreground); stroke-width: 3; }
+    .node.starred {
+      stroke: var(--star);
+      stroke-width: 2.4;
+      filter: drop-shadow(0 0 3px var(--star-glow));
+    }
+    .node.starred.selected { stroke-width: 3.2; }
+    .node.starred.dimmed { filter: none; }
     .dimmed { opacity: 0.10 !important; }
     .node-label {
       fill: var(--foreground);
@@ -107,6 +163,7 @@
     }
     .tooltip-title { font-weight: 600; }
     .tooltip-meta { margin-top: 0.25rem; font-size: 0.8rem; }
+    .tooltip-remark { margin-top: 0.35rem; font-size: 0.82rem; }
     .selection {
       margin-top: 0.6rem;
       padding: 0.7rem 0.8rem;
@@ -114,7 +171,7 @@
       background: var(--card);
     }
     .selection-title { font-weight: 600; }
-    .selection-meta, .selection-neighbors, .selection a {
+    .selection-meta, .selection-remark, .selection-neighbors, .selection a {
       margin-top: 0.28rem;
       font-size: 0.82rem;
     }
@@ -123,6 +180,8 @@
     [hidden] { display: none !important; }
     @media (max-width: 520px) {
       body { padding: 0.65rem; }
+      header { flex-direction: column; }
+      .sync-panel { width: 100%; }
       svg { height: 520px; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -133,14 +192,25 @@
 <body>
 <main id="arca-graph">
   <header>
-    <h1>__ARCA_TITLE_HTML__</h1>
-    <p>__ARCA_SUMMARY_HTML__</p>
+    <div>
+      <h1>__ARCA_TITLE_HTML__</h1>
+      <p>__ARCA_SUMMARY_HTML__</p>
+    </div>
+    <section class="sync-panel" data-state="never" aria-live="polite" aria-label="引用同步状态">
+      <div class="sync-copy">
+        <div class="sync-title"><span class="sync-dot" aria-hidden="true"></span><strong class="sync-label">引用同步：读取中</strong></div>
+        <div class="sync-detail">正在读取本地引用缓存。</div>
+      </div>
+      <button class="sync-button" type="button" disabled>立即同步</button>
+    </section>
   </header>
   <div class="legend" aria-label="主题分类图例"></div>
   <div class="encoding" aria-label="节点视觉编码">
     <span class="encoding-item"><span class="encoding-dot old-dot" aria-hidden="true"></span>较旧，更透明</span>
     <span class="encoding-arrow" aria-hidden="true">→</span>
     <span class="encoding-item"><span class="encoding-dot new-dot" aria-hidden="true"></span>较新，更不透明</span>
+    <span class="encoding-divider" aria-hidden="true">·</span>
+    <span class="encoding-item"><span class="encoding-dot star-dot" aria-hidden="true"></span>星标，轻微发光</span>
     <span class="encoding-divider" aria-hidden="true">·</span>
     <span>直径越大，被引次数越高</span>
     <span class="encoding-divider" aria-hidden="true">·</span>
@@ -153,7 +223,7 @@
   <div class="graph-stage">
     <svg viewBox="0 0 1000 620" role="img" aria-labelledby="graph-title graph-description">
       <title id="graph-title">__ARCA_TITLE_HTML__</title>
-      <desc id="graph-description">实线箭头表示引用，虚线表示标题与摘要的文本相似关系；旧论文受到向左的年份力，新论文受到向右的年份力。</desc>
+      <desc id="graph-description">实线箭头表示引用，虚线表示标题与摘要的文本相似关系；星标论文轻微发光；旧论文受到向左的年份力，新论文受到向右的年份力。</desc>
       <defs><marker id="arca-citation-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs>
       <g class="zoom-layer">
         <g class="links"></g>
@@ -167,6 +237,7 @@
   <div class="selection" aria-live="polite">
     <div class="selection-title">点击任一节点查看论文</div>
     <div class="selection-meta">缩小时优先标注高被引节点；放大后自动增加标签并显示标题。</div>
+    <div class="selection-remark"></div>
     <div class="selection-neighbors"></div>
     <a class="selection-link" hidden target="_blank" rel="noopener noreferrer">打开论文页面</a>
   </div>
@@ -178,6 +249,81 @@ __ARCA_D3_SOURCE__
 (() => {
   const root = document.getElementById('arca-graph');
   const dataset = __ARCA_DATA_JSON__;
+  const syncPanel = root.querySelector('.sync-panel');
+  const syncLabel = root.querySelector('.sync-label');
+  const syncDetail = root.querySelector('.sync-detail');
+  const syncButton = root.querySelector('.sync-button');
+  let syncToken = '';
+  const formatSyncTime = value => {
+    if (!value) return '从未';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat('zh-CN', {
+      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+    }).format(parsed);
+  };
+  const showSyncStatus = (status, detailOverride = '') => {
+    const current = status || {};
+    syncPanel.dataset.state = current.state || 'never';
+    syncLabel.textContent = `引用同步：${current.label || '尚未同步'}`;
+    const coverage = `${current.resolved_papers || 0}/${current.eligible_papers || 0} 篇已解析`;
+    const edges = `${current.citation_edges || 0} 条库内引用`;
+    const time = `更新于 ${formatSyncTime(current.generated_at)}`;
+    const unresolved = current.unresolved_papers
+      ? ` · ${current.unresolved_papers} 篇未被 Semantic Scholar 解析`
+      : '';
+    syncDetail.textContent = detailOverride || `${coverage} · ${edges} · ${time}${unresolved}`;
+    syncPanel.title = current.unresolved_ids?.length
+      ? `未解析：${current.unresolved_ids.join('、')}`
+      : '';
+  };
+  showSyncStatus(dataset.sync);
+
+  const loopbackService = location.protocol === 'http:' &&
+    ['127.0.0.1', 'localhost', '::1'].includes(location.hostname);
+  if (loopbackService) {
+    fetch('/api/sync-status', {cache: 'no-store'})
+      .then(response => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then(payload => {
+        syncToken = payload.sync_token || '';
+        showSyncStatus(payload.status);
+        syncButton.disabled = !syncToken;
+      })
+      .catch(error => {
+        syncPanel.dataset.state = 'error';
+        syncLabel.textContent = '引用同步：服务不可用';
+        syncDetail.textContent = error.message;
+      });
+  } else {
+    syncButton.disabled = true;
+    syncButton.title = '运行 arca serve 后可在页面中同步';
+    syncDetail.textContent += ' · 离线页面，运行 arca serve 启用按钮';
+  }
+
+  syncButton.addEventListener('click', async () => {
+    if (!syncToken || syncButton.disabled) return;
+    syncButton.disabled = true;
+    syncButton.textContent = '同步中…';
+    syncPanel.dataset.state = 'syncing';
+    syncLabel.textContent = '引用同步：正在请求 Semantic Scholar';
+    syncDetail.textContent = '完成后将自动刷新图谱。';
+    try {
+      const response = await fetch('/api/citation-sync', {
+        method: 'POST',
+        headers: {'X-Arca-Sync-Token': syncToken}
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      showSyncStatus(payload.status, '同步完成，正在刷新图谱…');
+      window.setTimeout(() => location.reload(), 450);
+    } catch (error) {
+      syncPanel.dataset.state = 'error';
+      syncLabel.textContent = '引用同步：失败';
+      syncDetail.textContent = error.message || String(error);
+      syncButton.disabled = false;
+      syncButton.textContent = '重试同步';
+    }
+  });
   const palette = [
     'var(--series-1)', 'var(--series-2)', 'var(--series-3)',
     'var(--series-4)', 'var(--series-5)', 'var(--series-6)',
@@ -196,15 +342,17 @@ __ARCA_D3_SOURCE__
   dataset.nodes.forEach((node, index) => {
     node._index = index;
     node._radius = Math.min(20, 4.2 + Math.sqrt(node.cited_by) * 1.7);
+    const prefix = node.starred ? '★ ' : '';
     node._labelText = [
-      node.id,
-      `${node.id} · ${shorten(node.title, 26)}`,
-      `${node.id} · ${shorten(node.title, 52)}`
+      `${prefix}${node.id}`,
+      `${prefix}${node.id} · ${shorten(node.title, 26)}`,
+      `${prefix}${node.id} · ${shorten(node.title, 52)}`
     ];
     node._labelWidth = node._labelText.map(label => Math.min(390, Math.max(48, label.length * 6.2)));
   });
   const nodeRadius = node => node._radius;
   const rankedNodes = [...dataset.nodes].sort((left, right) =>
+    Number(right.starred) - Number(left.starred) ||
     right.cited_by - left.cited_by || left.id.localeCompare(right.id)
   );
 
@@ -278,11 +426,11 @@ __ARCA_D3_SOURCE__
     .selectAll('circle')
     .data(dataset.nodes)
     .join('circle')
-    .attr('class', 'node')
+    .attr('class', node => `node${node.starred ? ' starred' : ''}`)
     .attr('r', node => nodeRadius(node))
     .attr('fill', node => categoryColor.get(node.category) || 'var(--muted-foreground)')
     .attr('opacity', node => yearOpacity(node.year))
-    .attr('aria-label', node => `${node.id}：${node.title}，引用 ${node.cites}，被引 ${node.cited_by}，文本近邻 ${node.text_degree}`)
+    .attr('aria-label', node => `${node.starred ? '星标，' : ''}${node.id}：${node.title}，引用 ${node.cites}，被引 ${node.cited_by}，文本近邻 ${node.text_degree}${node.remark ? `，注记：${node.remark}` : ''}`)
     .on('pointerenter', showTooltip)
     .on('pointermove', moveTooltip)
     .on('pointerleave', hideTooltip)
@@ -290,7 +438,7 @@ __ARCA_D3_SOURCE__
       event.stopPropagation();
       selectNode(node);
     });
-  nodes.append('title').text(node => `${node.title} (${node.id})`);
+  nodes.append('title').text(node => `${node.starred ? '★ ' : ''}${node.title} (${node.id})${node.remark ? ` — ${node.remark}` : ''}`);
 
   const labels = svg.select('.labels')
     .selectAll('text')
@@ -465,11 +613,17 @@ __ARCA_D3_SOURCE__
     tooltip.replaceChildren();
     const title = document.createElement('div');
     title.className = 'tooltip-title';
-    title.textContent = node.title;
+    title.textContent = `${node.starred ? '★ ' : ''}${node.title}`;
     const meta = document.createElement('div');
     meta.className = 'tooltip-meta';
     meta.textContent = `${node.id} · 引用 ${node.cites} · 被引 ${node.cited_by} · 文本近邻 ${node.text_degree}`;
     tooltip.append(title, meta);
+    if (node.remark) {
+      const remark = document.createElement('div');
+      remark.className = 'tooltip-remark';
+      remark.textContent = `注记：${node.remark}`;
+      tooltip.append(remark);
+    }
     tooltip.hidden = false;
     moveTooltip(event);
   }
@@ -500,17 +654,20 @@ __ARCA_D3_SOURCE__
 
     const title = root.querySelector('.selection-title');
     const meta = root.querySelector('.selection-meta');
+    const remark = root.querySelector('.selection-remark');
     const neighborLine = root.querySelector('.selection-neighbors');
     const link = root.querySelector('.selection-link');
     if (!selected) {
       title.textContent = '点击任一节点查看论文';
       meta.textContent = '缩小时只标高度数节点；放大后自动增加标签并显示标题。';
+      remark.textContent = '';
       neighborLine.textContent = '';
       link.hidden = true;
       return;
     }
-    title.textContent = selected.title;
-    meta.textContent = `${selected.id} · ${selected.year || '年份未知'} · 引用 ${selected.cites} · 被引 ${selected.cited_by} · 文本近邻 ${selected.text_degree} · ${selected.collections.join(' / ') || '未分类'}`;
+    title.textContent = `${selected.starred ? '★ ' : ''}${selected.title}`;
+    meta.textContent = `${selected.id} · ${selected.year || '年份未知'} · ${selected.starred ? '已星标 · ' : ''}引用 ${selected.cites} · 被引 ${selected.cited_by} · 文本近邻 ${selected.text_degree} · ${selected.collections.join(' / ') || '未分类'}`;
+    remark.textContent = selected.remark ? `注记：${selected.remark}` : '';
     neighborLine.textContent = `引用：${[...citationOut.get(selected.id)].sort().join('、') || '无'}　被引：${[...citationIn.get(selected.id)].sort().join('、') || '无'}　文本：${[...textNeighbors.get(selected.id)].sort().join('、') || '无'}`;
     if (selected.url) {
       link.href = selected.url;

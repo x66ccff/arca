@@ -47,6 +47,14 @@
       "additionalProperties": true
     },
     "status": { "type": "string", "enum": ["inbox", "reading", "key", "archived"] },
+    "starred": { "type": "boolean", "default": false },
+    "remark": {
+      "type": "string",
+      "maxLength": 30,
+      "pattern": "^[^\\r\\n]*$",
+      "default": ""
+    },
+    "remark_reviewed_at": { "type": ["string", "null"], "default": null },
     "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
     "collections": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
     "files": {
@@ -74,4 +82,3 @@
   },
   "additionalProperties": true
 }
-

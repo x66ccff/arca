@@ -24,6 +24,7 @@ cd arca
 ./arca init library
 ./arca --library library add 1706.03762
 ./arca --library library search "attention" --jsonl
+./arca --library library star 1706.03762
 ./arca --library library citation-sync
 ./arca --library library visualize
 ```
@@ -39,8 +40,10 @@ metadata-only record.
 - Stores metadata, PDFs, notes, annotations, and relationships in ordinary folders.
 - Imports papers directly from an arXiv ID or URL.
 - Searches locally with stable text, JSON, or JSONL output.
+- Stores portable stars and human-reviewed short remarks of at most 30 characters.
 - Links papers into a portable, editable knowledge graph.
 - Builds an interactive citation and title/abstract-similarity graph.
+- Shows citation-sync coverage and offers one-click refresh in loopback service mode.
 - Uses atomic writes, validates PDFs, and moves removals to `.trash/`.
 
 No database, server, account, or package manager is required. Local search,
@@ -60,6 +63,9 @@ PDF files directly.
 
 # Organize
 ./arca --library library update 1706.03762 --status key --add-tag attention
+./arca --library library star 1706.03762
+./arca --library library remark 1706.03762 --text "Core attention architecture"
+./arca --library library list --starred
 ./arca --library library note 1706.03762 "Canonical Transformer paper."
 ./arca --library library annotate 1706.03762 --page 3 --quote "..." --comment "Core architecture"
 
@@ -126,6 +132,26 @@ force draws older papers left and newer papers right while preserving citation
 and topic forces. Zooming reveals progressively more labels, and clicking a
 node highlights its neighbors. Visualization remains offline after
 `citation-sync`.
+
+Starred papers receive a restrained gold halo and are prioritized for overview
+labels. Reviewed short remarks appear in tooltips and the selection panel. The
+header reports cache freshness, resolved-paper coverage, and the number of
+in-library citation edges.
+
+The standalone `file://` graph keeps this status visible but disables its sync
+button because static HTML cannot execute a local command. Start the optional
+loopback-only service to enable one-click Semantic Scholar refresh:
+
+```bash
+./arca --library library serve --open
+```
+
+The service binds to `127.0.0.1`, serves only the generated graph and sync API,
+and does not expose PDFs, notes, or canonical metadata. Mutating requests
+require a per-process same-origin token and loopback Host/Origin checks.
+
+`remark` always displays the proposed text and character count in a terminal;
+the reviewer must type `确认`. There is no non-interactive approval bypass.
 
 ## License
 
