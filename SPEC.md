@@ -60,12 +60,29 @@ JavaScript. `_index/paper-graph.html` MAY contain a generated standalone
 visualization. Consumers MUST tolerate every `_index/` artifact being absent
 and MAY rebuild them from canonical metadata and `graph/edges.jsonl`.
 
+The visualization MAY embed citation-sync status from
+`_index/citation-cache.json`. Interactive synchronization is available only
+through the optional loopback Arca service; a standalone `file://` copy MUST
+remain readable and MUST NOT imply that it can execute local commands. The
+service binds to a loopback IP, serves no canonical paper files, and requires a
+per-process same-origin token for mutating synchronization requests.
+
 ## 6. Notes and annotations
 
 `summary.md` is intentionally unstructured and may link to another record with
 the stable `arca:<paper-id>` form. Structured PDF annotations contain a UUID,
 optional 1-based page number, optional quote, comment, tags, and timestamps.
 Implementations MUST preserve unknown annotation fields.
+
+Paper metadata MAY contain `starred` (boolean, default `false`) and `remark`
+(single-line string, default empty). `remark` is a deliberately short human
+summary and MUST contain at most 30 Unicode characters. Reference clients MUST
+show the proposed value and require interactive human approval before setting
+or clearing `remark`; they MUST NOT provide a non-interactive bypass. Starred
+papers SHOULD receive a subtle visual emphasis without changing graph topology.
+An accepted mutation records `remark_reviewed_at`; a non-empty `remark` without
+that audit timestamp is invalid. Ingesting metadata with a non-empty remark
+requires the same review again.
 
 ## 7. Paper graph
 
